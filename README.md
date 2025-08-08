@@ -1,73 +1,138 @@
-# Welcome to your Lovable project
+# 🏏 CricHeroes - Cricket Scoring & Tournament Management
 
-## Project info
+A comprehensive cricket management app built with React, TailwindCSS, and Supabase for organizing matches, tournaments, and tracking player statistics.
 
-**URL**: https://lovable.dev/projects/75939d63-1a26-4ef7-ac20-d3e30a34b1cf
+## 🚀 Features
 
-## How can I edit this code?
+### ✅ **Authentication & Players**
+- User authentication with Supabase Auth
+- Player profiles with batting/bowling styles
+- Player statistics tracking
 
-There are several ways of editing your application.
+### 🔧 **Planned Features**
+- **Teams Management**: Create/join teams, manage players, team statistics
+- **Match Scheduling**: Create matches, select teams, live scoring
+- **Tournament System**: Multi-team tournaments with league/knockout formats
+- **Live Scoring**: Ball-by-ball scoring, real-time scorecards
+- **Analytics**: Player rankings, team performance, match insights
+- **Mobile PWA**: Offline support and app-like experience
 
-**Use Lovable**
+## 🛠️ Tech Stack
 
-Simply visit the [Lovable Project](https://lovable.dev/projects/75939d63-1a26-4ef7-ac20-d3e30a34b1cf) and start prompting.
+- **Frontend**: React 18 + TypeScript + Vite
+- **Styling**: TailwindCSS with shadcn/ui components
+- **Backend**: Supabase (PostgreSQL + Auth + Storage)
+- **State Management**: TanStack Query
+- **Routing**: React Router DOM
 
-Changes made via Lovable will be committed automatically to this repo.
+## 📊 Database Schema
 
-**Use your preferred IDE**
+### Core Tables
+- `profiles` - Player information and stats
+- `teams` - Team details and management
+- `matches` - Match scheduling and results
+- `tournaments` - Tournament organization
+- `match_scores` - Ball-by-ball scoring data
 
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
+## 🚀 Getting Started
 
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
+### Prerequisites
+- Node.js 18+ and npm
+- Supabase account
 
-Follow these steps:
+### Installation
 
-```sh
-# Step 1: Clone the repository using the project's Git URL.
-git clone <YOUR_GIT_URL>
+1. **Clone the repository**
+   ```bash
+   git clone <repository-url>
+   cd cricheroes
+   ```
 
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
+2. **Install dependencies**
+   ```bash
+   npm install
+   ```
 
-# Step 3: Install the necessary dependencies.
-npm i
+3. **Start development server**
+   ```bash
+   npm run dev
+   ```
 
-# Step 4: Start the development server with auto-reloading and an instant preview.
-npm run dev
-```
+4. **Open your browser**
+   Navigate to `http://localhost:8080`
 
-**Edit a file directly in GitHub**
+## 🏗️ Development Roadmap
 
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
+### Phase 1: Setup & Auth ✅
+- [x] Project setup with Vite + React + TailwindCSS
+- [x] Supabase integration and configuration
+- [x] User authentication (login/signup)
+- [x] Player profiles database schema
 
-**Use GitHub Codespaces**
+### Phase 2: Player Module (In Progress)
+- [ ] Player profile UI
+- [ ] Profile editing and image upload
+- [ ] Player statistics display
 
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
+### Phase 3: Team Module
+- [ ] Create and join teams
+- [ ] Team management interface
+- [ ] Captain permissions and player roles
 
-## What technologies are used for this project?
+### Phase 4: Match System
+- [ ] Match scheduling interface
+- [ ] Team selection for matches
+- [ ] Match details and configuration
 
-This project is built with:
+### Phase 5: Live Scoring
+- [ ] Playing XI selection
+- [ ] Ball-by-ball scoring interface
+- [ ] Real-time scorecard generation
 
-- Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
+### Phase 6: Tournaments
+- [ ] Tournament creation and management
+- [ ] Multi-team participation
+- [ ] Points table and knockout handling
 
-## How can I deploy this project?
+### Phase 7: Analytics & Insights
+- [ ] Player and team leaderboards
+- [ ] Performance analytics
+- [ ] Match history and insights
 
-Simply open [Lovable](https://lovable.dev/projects/75939d63-1a26-4ef7-ac20-d3e30a34b1cf) and click on Share -> Publish.
+## 🎯 Key Features
 
-## Can I connect a custom domain to my Lovable project?
+### 🏏 **Cricket-Specific**
+- Support for T10, T20, and ODI formats
+- Professional scoring system with extras
+- Toss management and team selection
+- Comprehensive player statistics
 
-Yes, you can!
+### 📱 **User Experience**
+- Responsive design for mobile and desktop
+- Dark/light mode support
+- Fast and intuitive interface
+- Real-time updates
 
-To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
+### 🔒 **Security**
+- Row Level Security (RLS) policies
+- Secure user authentication
+- Data privacy and protection
 
-Read more here: [Setting up a custom domain](https://docs.lovable.dev/tips-tricks/custom-domain#step-by-step-guide)
+## 🤝 Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Submit a pull request
+
+## 📄 License
+
+This project is licensed under the MIT License.
+
+## 🌟 Support
+
+If you find this project helpful, please give it a star! ⭐
+
+---
+
+**Built with ❤️ for cricket enthusiasts**

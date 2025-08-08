@@ -1,8 +1,12 @@
+import React from 'react';
 import { Navigate, Link } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import { useAuth } from '@/contexts/AuthContext';
+import Navigation from '@/components/Navigation';
+import { User, Users, Calendar, Trophy, BarChart3, Award } from 'lucide-react';
 
-const Index = () => {
+const Index: React.FC = () => {
   const { user, loading, signOut } = useAuth();
 
   if (loading) {
@@ -22,19 +26,7 @@ const Index = () => {
 
   return (
     <div className="min-h-screen bg-background">
-      <header className="border-b">
-        <div className="container mx-auto px-4 py-4 flex items-center justify-between">
-          <h1 className="text-2xl font-bold">🏏 CricHeroes</h1>
-          <div className="flex items-center gap-4">
-            <span className="text-sm text-muted-foreground">
-              Welcome, {user.email}
-            </span>
-            <Button variant="outline" onClick={signOut}>
-              Sign Out
-            </Button>
-          </div>
-        </div>
-      </header>
+      <Navigation />
 
       <main className="container mx-auto px-4 py-8">
         <div className="text-center max-w-2xl mx-auto">
@@ -45,46 +37,67 @@ const Index = () => {
           </p>
           
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mt-12">
-            <div className="p-6 border rounded-lg">
+            <Link to="/profile" className="p-6 border rounded-lg hover:border-primary transition-colors">
+              <div className="flex items-center justify-center mb-4">
+                <User className="h-8 w-8 text-primary" />
+              </div>
               <h3 className="text-lg font-semibold mb-2">Player Profiles</h3>
               <p className="text-muted-foreground">
                 Create and manage your cricket profile with stats and achievements.
               </p>
-            </div>
+            </Link>
             
-            <div className="p-6 border rounded-lg">
+            <Link to="/teams" className="p-6 border rounded-lg hover:border-primary transition-colors">
+              <div className="flex items-center justify-center mb-4">
+                <Users className="h-8 w-8 text-primary" />
+              </div>
               <h3 className="text-lg font-semibold mb-2">Teams</h3>
               <p className="text-muted-foreground">
                 Create teams, invite players, and manage your squad.
               </p>
-            </div>
+            </Link>
             
-            <div className="p-6 border rounded-lg">
+            <Link to="/matches" className="p-6 border rounded-lg hover:border-primary transition-colors">
+              <div className="flex items-center justify-center mb-4">
+                <Calendar className="h-8 w-8 text-primary" />
+              </div>
               <h3 className="text-lg font-semibold mb-2">Matches</h3>
               <p className="text-muted-foreground">
                 Schedule matches and track live scores with detailed scorecards.
               </p>
-            </div>
+            </Link>
             
-            <div className="p-6 border rounded-lg">
+            <div className="p-6 border rounded-lg opacity-50">
+              <div className="flex items-center justify-center mb-4">
+                <Trophy className="h-8 w-8 text-muted-foreground" />
+              </div>
               <h3 className="text-lg font-semibold mb-2">Tournaments</h3>
               <p className="text-muted-foreground">
                 Organize multi-team tournaments with league and knockout formats.
               </p>
+              <Badge variant="secondary" className="mt-2">Coming Soon</Badge>
             </div>
             
-            <div className="p-6 border rounded-lg">
+            <div className="p-6 border rounded-lg opacity-50">
+              <div className="flex items-center justify-center mb-4">
+                <BarChart3 className="h-8 w-8 text-muted-foreground" />
+              </div>
               <h3 className="text-lg font-semibold mb-2">Analytics</h3>
               <p className="text-muted-foreground">
                 Track performance with detailed statistics and insights.
               </p>
+              <Badge variant="secondary" className="mt-2">Coming Soon</Badge>
             </div>
             
-            <div className="p-6 border rounded-lg">
+            <div className="p-6 border rounded-lg opacity-50">
+              <div className="flex items-center justify-center mb-4">
+                <Award className="h-8 w-8 text-muted-foreground" />
+              </div>
               <h3 className="text-lg font-semibold mb-2">Leaderboards</h3>
               <p className="text-muted-foreground">
                 Compete with friends and climb the rankings.
               </p>
+              <Badge variant="secondary" className="mt-2">Coming Soon</Badge>
             </div>
           </div>
         </div>

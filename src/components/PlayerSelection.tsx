@@ -59,7 +59,7 @@ const PlayerSelection: React.FC<PlayerSelectionProps> = ({ battingTeamPlayers, b
               <SelectTrigger>
                 <SelectValue placeholder="Select striker" />
               </SelectTrigger>
-              <SelectContent>
+              <SelectContent className="z-50 bg-popover">
                 {playingBatsmen.map(p => (
                   <SelectItem key={p.player_id} value={p.player_id}>{p.player.name}</SelectItem>
                 ))}
@@ -72,7 +72,7 @@ const PlayerSelection: React.FC<PlayerSelectionProps> = ({ battingTeamPlayers, b
               <SelectTrigger>
                 <SelectValue placeholder="Select non-striker" />
               </SelectTrigger>
-              <SelectContent>
+              <SelectContent className="z-50 bg-popover">
                 {playingBatsmen.map(p => (
                   <SelectItem key={p.player_id} value={p.player_id}>{p.player.name}</SelectItem>
                 ))}
@@ -86,7 +86,7 @@ const PlayerSelection: React.FC<PlayerSelectionProps> = ({ battingTeamPlayers, b
             <SelectTrigger>
               <SelectValue placeholder="Select bowler" />
             </SelectTrigger>
-            <SelectContent>
+            <SelectContent className="z-50 bg-popover">
               {playingBowlers.map(p => (
                 <SelectItem key={p.player_id} value={p.player_id}>{p.player.name}</SelectItem>
               ))}

@@ -76,6 +76,8 @@ const LiveScoring: React.FC<LiveScoringProps> = ({
 
   const playingXIBatsmen = battingTeamPlayers.filter(p => p.is_playing_xi);
   const playingXIBowlers = bowlingTeamPlayers.filter(p => p.is_playing_xi);
+  const batsmenList = playingXIBatsmen.length ? playingXIBatsmen : battingTeamPlayers;
+  const bowlersList = playingXIBowlers.length ? playingXIBowlers : bowlingTeamPlayers;
 
 useEffect(() => {
   setNewInning(currentInning);
@@ -224,8 +226,8 @@ useEffect(() => {
               <SelectTrigger>
                 <SelectValue placeholder="Select batsman" />
               </SelectTrigger>
-              <SelectContent>
-                {playingXIBatsmen.map((player) => (
+              <SelectContent className="z-50 bg-popover">
+                {batsmenList.map((player) => (
                   <SelectItem key={player.player_id} value={player.player_id}>
                     {player.player.name}
                   </SelectItem>
@@ -239,8 +241,8 @@ useEffect(() => {
               <SelectTrigger>
                 <SelectValue placeholder="Select bowler" />
               </SelectTrigger>
-              <SelectContent>
-                {playingXIBowlers.map((player) => (
+              <SelectContent className="z-50 bg-popover">
+                {bowlersList.map((player) => (
                   <SelectItem key={player.player_id} value={player.player_id}>
                     {player.player.name}
                   </SelectItem>

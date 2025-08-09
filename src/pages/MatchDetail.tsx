@@ -37,6 +37,7 @@ interface MatchPlayer {
   id: string;
   player_id: string;
   is_playing_xi: boolean;
+  team_id: string;
   player: Player;
 }
 
@@ -162,9 +163,33 @@ const MatchDetail = () => {
 
       if (playersError) throw playersError;
 
-      // Separate players by team
-      const teamA = matchPlayers?.filter(p => p.team_id === matchData.team_a.id) || [];
-      const teamB = matchPlayers?.filter(p => p.team_id === matchData.team_b.id) || [];
+      // Separate players by team or fallback to team rosters
+      let teamA: MatchPlayer[] = [];
+      let teamB: MatchPlayer[] = [];
+
+      if (matchPlayers && matchPlayers.length > 0) {
+        teamA = matchPlayers.filter((p: any) => p.team_id === matchData.team_a.id);
+        teamB = matchPlayers.filter((p: any) => p.team_id === matchData.team_b.id);
+      } else {
+        // Fallback to team rosters if match players are not set
+        const { data: rosters, error: rosterError } = await supabase
+          .from('team_players')
+          .select(`id, team_id, player_id, player:profiles(name, image_url, batting_style, bowling_style)`) 
+          .in('team_id', [matchData.team_a.id, matchData.team_b.id]);
+
+        if (rosterError) throw rosterError;
+
+        const mapped: MatchPlayer[] = (rosters || []).map((r: any) => ({
+          id: r.id,
+          player_id: r.player_id,
+          team_id: r.team_id,
+          is_playing_xi: true,
+          player: r.player
+        }));
+
+        teamA = mapped.filter(p => p.team_id === matchData.team_a.id);
+        teamB = mapped.filter(p => p.team_id === matchData.team_b.id);
+      }
       
       setTeamAPlayers(teamA);
       setTeamBPlayers(teamB);

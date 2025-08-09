@@ -13,6 +13,8 @@ import Navigation from '@/components/Navigation';
 import PageHeader from '@/components/PageHeader';
 import LiveScoring from '@/components/LiveScoring';
 import Scorecard from '@/components/Scorecard';
+import TossStep from '@/components/TossStep';
+import PlayerSelection from '@/components/PlayerSelection';
 
 interface Team {
   id: string;
@@ -83,6 +85,8 @@ const MatchDetail = () => {
   const [currentBall, setCurrentBall] = useState(1);
   const [battingTeam, setBattingTeam] = useState<Team | null>(null);
   const [bowlingTeam, setBowlingTeam] = useState<Team | null>(null);
+  const [selectedBatsmen, setSelectedBatsmen] = useState<string[] | null>(null);
+  const [selectedBowler, setSelectedBowler] = useState<string | null>(null);
 
   useEffect(() => {
     if (matchId && user) {
@@ -388,7 +392,7 @@ const MatchDetail = () => {
                   )}
                 </div>
 
-                {isCreator && match.status === 'scheduled' && (
+                {isCreator && match.status === 'scheduled' && match.toss_winner && (
                   <Button onClick={startMatch} className="w-full">
                     <Play className="h-4 w-4 mr-2" />
                     Start Match
@@ -430,7 +434,50 @@ const MatchDetail = () => {
               </TabsContent>
 
               <TabsContent value="scoring" className="space-y-4">
-                {match.status === 'in_progress' && isCreator && battingTeam && bowlingTeam ? (
+                {!isCreator ? (
+                  <Card>
+                    <CardContent className="text-center py-8">
+                      <p className="text-muted-foreground">Only the match creator can score.</p>
+                    </CardContent>
+                  </Card>
+                ) : match.status === 'scheduled' && (!match.toss_winner || !match.toss_decision) ? (
+                  <TossStep
+                    matchId={match.id}
+                    teamA={match.team_a}
+                    teamB={match.team_b}
+                    onSaved={(winner, decision) => {
+                      setMatch(prev => prev ? { ...prev, toss_winner: winner, toss_decision: decision } : prev);
+                      if (decision === 'bat') {
+                        setBattingTeam(winner);
+                        setBowlingTeam(winner.id === match.team_a.id ? match.team_b : match.team_a);
+                      } else {
+                        setBowlingTeam(winner);
+                        setBattingTeam(winner.id === match.team_a.id ? match.team_b : match.team_a);
+                      }
+                    }}
+                  />
+                ) : match.status === 'scheduled' && battingTeam && bowlingTeam && !selectedBatsmen ? (
+                  <PlayerSelection
+                    battingTeamPlayers={battingTeam.id === match.team_a.id ? teamAPlayers : teamBPlayers}
+                    bowlingTeamPlayers={bowlingTeam.id === match.team_a.id ? teamAPlayers : teamBPlayers}
+                    onSelected={async (batsmen, bowler) => {
+                      setSelectedBatsmen(batsmen);
+                      setSelectedBowler(bowler);
+                      try {
+                        const { error } = await supabase
+                          .from('matches')
+                          .update({ status: 'in_progress' })
+                          .eq('id', match.id);
+                        if (error) throw error;
+                        setMatch(prev => prev ? { ...prev, status: 'in_progress' } : prev);
+                        toast({ title: 'Scoring started', description: 'Match is now in progress.' });
+                      } catch (e) {
+                        console.error(e);
+                        toast({ title: 'Error', description: 'Failed to start match', variant: 'destructive' });
+                      }
+                    }}
+                  />
+                ) : match.status === 'in_progress' && battingTeam && bowlingTeam ? (
                   <LiveScoring
                     matchId={match.id}
                     currentInning={currentInning}
@@ -441,15 +488,13 @@ const MatchDetail = () => {
                     totalOvers={match.overs}
                     onScoreAdded={handleScoreAdded}
                     onPositionUpdate={handlePositionUpdate}
+                    initialBatsmen={selectedBatsmen || undefined}
+                    initialBowler={selectedBowler || undefined}
                   />
                 ) : (
                   <Card>
                     <CardContent className="text-center py-8">
-                      <p className="text-muted-foreground">
-                        {match.status === 'scheduled' 
-                          ? 'Match has not started yet.' 
-                          : 'Only the match creator can score.'}
-                      </p>
+                      <p className="text-muted-foreground">Preparing match data...</p>
                     </CardContent>
                   </Card>
                 )}

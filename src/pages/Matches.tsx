@@ -78,7 +78,11 @@ const Matches = () => {
         .order('name');
 
       if (teamsError) throw teamsError;
-      setTeams(teamsData || []);
+      const normalizedTeams = (teamsData || []).map((t: any) => ({
+        ...t,
+        captain: Array.isArray(t.captain) ? t.captain[0] : t.captain
+      }));
+      setTeams(normalizedTeams as Team[]);
 
       // Fetch matches with team details
       const { data: matchesData, error: matchesError } = await supabase

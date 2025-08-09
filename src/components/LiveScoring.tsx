@@ -46,6 +46,8 @@ interface LiveScoringProps {
   totalOvers: number;
   onScoreAdded: (score: Score) => void;
   onPositionUpdate: (inning: number, over: number, ball: number) => void;
+  initialBatsmen?: string[];
+  initialBowler?: string;
 }
 
 const LiveScoring: React.FC<LiveScoringProps> = ({
@@ -57,7 +59,9 @@ const LiveScoring: React.FC<LiveScoringProps> = ({
   bowlingTeamPlayers,
   totalOvers,
   onScoreAdded,
-  onPositionUpdate
+  onPositionUpdate,
+  initialBatsmen,
+  initialBowler
 }) => {
   const { toast } = useToast();
   const [selectedBatsman, setSelectedBatsman] = useState<string>('');
@@ -73,11 +77,20 @@ const LiveScoring: React.FC<LiveScoringProps> = ({
   const playingXIBatsmen = battingTeamPlayers.filter(p => p.is_playing_xi);
   const playingXIBowlers = bowlingTeamPlayers.filter(p => p.is_playing_xi);
 
-  useEffect(() => {
-    setNewInning(currentInning);
-    setNewOver(currentOver);
-    setNewBall(currentBall);
-  }, [currentInning, currentOver, currentBall]);
+useEffect(() => {
+  setNewInning(currentInning);
+  setNewOver(currentOver);
+  setNewBall(currentBall);
+}, [currentInning, currentOver, currentBall]);
+
+useEffect(() => {
+  if (!selectedBatsman && initialBatsmen?.length) {
+    setSelectedBatsman(initialBatsmen[0]);
+  }
+  if (!selectedBowler && initialBowler) {
+    setSelectedBowler(initialBowler);
+  }
+}, [initialBatsmen, initialBowler]);
 
   const addScore = async () => {
     if (!selectedBatsman || !selectedBowler) {

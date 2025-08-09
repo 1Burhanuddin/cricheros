@@ -170,9 +170,9 @@ const Scorecard: React.FC<ScorecardProps> = ({
           </div>
 
           {/* Current Position */}
-          <div className="mt-4 p-3 bg-muted rounded-lg">
+          <div className="mt-4 p-3 ">
             <div className="flex items-center justify-between">
-              <span className="text-sm font-medium">Current Position:</span>
+              {/* <span className="text-sm font-medium">Current Position:</span> */}
               <Badge variant="default">
                 Inning {currentInning} • Over {currentOver}.{currentBall} • {totalOvers} overs match
               </Badge>
@@ -182,11 +182,11 @@ const Scorecard: React.FC<ScorecardProps> = ({
       </Card>
 
       {/* Ball-by-Ball Commentary */}
-      <Card>
+      {/* <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Target className="h-5 w-5" />
-            Ball-by-Ball Commentary
+            Commentary
           </CardTitle>
           <CardDescription>
             Live updates from the current innings
@@ -207,7 +207,7 @@ const Scorecard: React.FC<ScorecardProps> = ({
                     </Badge>
                     <div>
                       <p className="font-medium">
-                        {getPlayerName(score.batsman_id)} vs {getPlayerName(score.bowler_id)}
+                        {getPlayerName(score.bowler_id)} to {getPlayerName(score.batsman_id)}
                       </p>
                       <p className="text-sm text-muted-foreground">
                         {getScoreDescription(score)}
@@ -224,7 +224,7 @@ const Scorecard: React.FC<ScorecardProps> = ({
             </div>
           )}
         </CardContent>
-      </Card>
+      </Card> */}
 
       {/* Innings Summary */}
       {previousInningScores.length > 0 && (

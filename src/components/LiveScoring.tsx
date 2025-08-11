@@ -829,7 +829,9 @@ const LiveScoring = ({
     setShowBowlerSelector(true);
   };
 
-  const isFirstInningComplete = currentInning === 1 && (newOver >= totalOvers || (newOver === totalOvers && newBall === 0));
+  // Check if we should show start second inning button - this happens when showStartSecondInning is true
+  // regardless of the current inning number since teams have already switched
+  const isFirstInningComplete = showStartSecondInning;
 
   return (
     <Card>

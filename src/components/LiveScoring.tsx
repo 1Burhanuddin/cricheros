@@ -1110,22 +1110,23 @@ const LiveScoring = ({
           </DialogContent>
         </Dialog>
 
-        {/* Start Second Inning Card */}
-        {isFirstInningComplete && showStartSecondInning && (
-          <Card className="my-8">
-            <CardHeader>
-              <CardTitle>🏏 1st Innings Complete!</CardTitle>
-              <CardDescription>
-                Click below to start the 2nd inning. You will then select the new batsmen and bowler.
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
+        {/* Start Second Inning Popup */}
+        <Dialog open={isFirstInningComplete && showStartSecondInning} onOpenChange={() => {}}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle className="text-center text-lg">🏏 1st Innings Complete!</DialogTitle>
+              <DialogDescription className="text-center">
+                The first innings has ended. Teams will now switch roles. 
+                Click below to start the 2nd inning and select new batsmen and bowler.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="flex justify-center pt-4">
               <Button size="lg" className="w-full" onClick={handleStartSecondInning}>
                 Start 2nd Inning
               </Button>
-            </CardContent>
-          </Card>
-        )}
+            </div>
+          </DialogContent>
+        </Dialog>
 
         {/* Current Statistics Display */}
         {!showStartSecondInning && (

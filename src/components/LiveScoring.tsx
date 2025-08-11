@@ -829,7 +829,7 @@ const LiveScoring = ({
     setShowBowlerSelector(true);
   };
 
-  const isFirstInningComplete = currentInning === 1 && newOver >= totalOvers && newBall === 1;
+  const isFirstInningComplete = currentInning === 1 && (newOver >= totalOvers || (newOver === totalOvers && newBall === 0));
 
   return (
     <Card>

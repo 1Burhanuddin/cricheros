@@ -16,6 +16,7 @@ import LiveScoring from '@/components/LiveScoring';
 import Scorecard from '@/components/Scorecard';
 import TossStep from '@/components/TossStep';
 import PlayerSelection from '@/components/PlayerSelection';
+import { formatOverDisplay, overToDecimal, getCurrentOverDisplay } from '@/utils/overManagement';
 
 interface Team {
   id: string;
@@ -129,7 +130,9 @@ const MatchDetail = () => {
             name,
             logo_url,
             captain:profiles!teams_captain_id_fkey(name)
-          )
+          ),
+          current_batsmen,
+          current_bowler_id
         `)
         .eq('id', matchId)
         .single();
@@ -151,6 +154,16 @@ const MatchDetail = () => {
         // Default: team_a bats first
         setBattingTeam(matchData.team_a);
         setBowlingTeam(matchData.team_b);
+      }
+
+      // If match is in progress, hydrate current selections so scoring can resume
+      if (matchData.status === 'in_progress') {
+        if (Array.isArray(matchData.current_batsmen) && matchData.current_batsmen.length > 0) {
+          setSelectedBatsmen(matchData.current_batsmen as string[]);
+        }
+        if (matchData.current_bowler_id) {
+          setSelectedBowler(matchData.current_bowler_id as string);
+        }
       }
 
       // Fetch match players
@@ -266,6 +279,25 @@ const MatchDetail = () => {
     setCurrentInning(inning);
     setCurrentOver(over);
     setCurrentBall(ball);
+    
+    // Handle team switching when innings change
+    if (inning > currentInning && inning <= 2) {
+      // Switch batting and bowling teams
+      const newBattingTeam = battingTeam?.id === match?.team_a.id ? match?.team_b : match?.team_a;
+      const newBowlingTeam = battingTeam?.id === match?.team_a.id ? match?.team_a : match?.team_b;
+      
+      setBattingTeam(newBattingTeam);
+      setBowlingTeam(newBowlingTeam);
+      
+      // Clear current selections to force new selection
+      setSelectedBatsmen(null);
+      setSelectedBowler(null);
+      
+      toast({
+        title: "Innings Change",
+        description: `Innings ${inning} starting. ${newBattingTeam?.name} will bat, ${newBowlingTeam?.name} will bowl. Please select new batsmen and bowler.`
+      });
+    }
   };
 
   const getStatusBadge = (status: string) => {
@@ -358,78 +390,8 @@ const MatchDetail = () => {
         />
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          {/* Match Info */}
-          <div className="lg:col-span-1">
-            <Card>
-              <CardHeader>
-                <div className="flex items-center justify-between">
-                  <CardTitle>Match Information</CardTitle>
-                  {getStatusBadge(match.status)}
-                </div>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="flex items-center gap-3">
-                  <Avatar className="h-12 w-12">
-                    <AvatarImage src={match.team_a.logo_url || ''} />
-                    <AvatarFallback className="text-lg">
-                      {match.team_a.name.charAt(0).toUpperCase()}
-                    </AvatarFallback>
-                  </Avatar>
-                  <div>
-                    <h3 className="font-semibold">{match.team_a.name}</h3>
-                    <p className="text-sm text-muted-foreground">
-                      {teamAScore.runs}/{teamAScore.wickets} ({currentInning === 1 ? `${currentOver}.${currentBall}` : 'Completed'})
-                    </p>
-                  </div>
-                </div>
-
-                <div className="flex items-center justify-center">
-                  <span className="text-lg font-semibold">vs</span>
-                </div>
-
-                <div className="flex items-center gap-3">
-                  <Avatar className="h-12 w-12">
-                    <AvatarImage src={match.team_b.logo_url || ''} />
-                    <AvatarFallback className="text-lg">
-                      {match.team_b.name.charAt(0).toUpperCase()}
-                    </AvatarFallback>
-                  </Avatar>
-                  <div>
-                    <h3 className="font-semibold">{match.team_b.name}</h3>
-                    <p className="text-sm text-muted-foreground">
-                      {teamBScore.runs}/{teamBScore.wickets} ({currentInning === 2 ? `${currentOver}.${currentBall}` : currentInning > 1 ? 'Batting' : 'Yet to bat'})
-                    </p>
-                  </div>
-                </div>
-
-                <div className="pt-4 space-y-2">
-                  <p className="text-sm text-muted-foreground">
-                    <strong>Overs:</strong> {match.overs}
-                  </p>
-                  {match.location && (
-                    <p className="text-sm text-muted-foreground">
-                      <strong>Location:</strong> {match.location}
-                    </p>
-                  )}
-                  {match.toss_winner && (
-                    <p className="text-sm text-muted-foreground">
-                      <strong>Toss:</strong> {match.toss_winner.name} chose to {match.toss_decision}
-                    </p>
-                  )}
-                </div>
-
-                {isCreator && match.status === 'scheduled' && match.toss_winner && (
-                  <Button onClick={startMatch} className="w-full">
-                    <Play className="h-4 w-4 mr-2" />
-                    Start Match
-                  </Button>
-                )}
-              </CardContent>
-            </Card>
-          </div>
-
-          {/* Match Content */}
-          <div className="lg:col-span-2">
+          {/* Match Content (expanded to include match info) */}
+          <div className="lg:col-span-3">
             <Tabs defaultValue="scorecard" className="w-full">
               <TabsList className={`grid w-full ${isCreator ? 'grid-cols-2' : 'grid-cols-1'} rounded-full bg-muted p-1`}>
                 <TabsTrigger value="scorecard" className="rounded-full">Scorecard</TabsTrigger>
@@ -437,7 +399,7 @@ const MatchDetail = () => {
               </TabsList>
 
               <TabsContent value="scorecard" className="space-y-4">
-                {/* Show scorecard first */}
+                {/* Scorecard */}
                 {battingTeam && bowlingTeam ? (
                   <Scorecard
                     scores={scores}
@@ -449,6 +411,12 @@ const MatchDetail = () => {
                     totalOvers={match.overs}
                     teamAPlayers={teamAPlayers}
                     teamBPlayers={teamBPlayers}
+                    meta={{
+                      status: match.status,
+                      location: match.location,
+                      tossWinnerName: match.toss_winner?.name || null,
+                      tossDecision: match.toss_decision
+                    }}
                   />
                 ) : (
                   <Card>
@@ -487,7 +455,7 @@ const MatchDetail = () => {
                           };
                           
                           const formatOver = (overNum: number, ballNum: number) => {
-                            return `${overNum}.${ballNum}`;
+                            return formatOverDisplay(overNum, ballNum);
                           };
                           
                           const getScoreDescription = (score: any) => {
@@ -568,167 +536,163 @@ const MatchDetail = () => {
                       </CardHeader>
                       <CardContent>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                          {/* Team A */}
                           <div>
                             <h3 className="font-semibold mb-3">{match.team_a.name}</h3>
-                            <div className="space-y-2">
-                              {/* Show only current batsmen if this team is batting */}
-                              {currentInning === 1 && battingTeam?.id === match.team_a.id && (
-                                <>
-                                  {selectedBatsmen && selectedBatsmen.length > 0 && selectedBatsmen.map((batsmanId, index) => {
-                                    const player = teamAPlayers.find(p => p.player_id === batsmanId);
-                                    if (!player) return null;
-                                    
-                                    // Calculate individual batsman stats from scores
+                            <div className="space-y-0">
+                              {teamAPlayers
+                                .filter(p => p.is_playing_xi)
+                                .sort((a, b) => {
+                                  // Sort currently playing players first
+                                  const aIsPlaying = selectedBatsmen && selectedBatsmen.includes(a.player_id);
+                                  const bIsPlaying = selectedBatsmen && selectedBatsmen.includes(b.player_id);
+                                  if (aIsPlaying && !bIsPlaying) return -1;
+                                  if (!aIsPlaying && bIsPlaying) return 1;
+                                  return 0;
+                                })
+                                .map((player, index) => {
+                                  // Check if this player is currently batting
+                                  const isCurrentlyBatting = selectedBatsmen && selectedBatsmen.includes(player.player_id);
+                                  const isCurrentTeamBatting = currentInning === 1 && battingTeam?.id === match.team_a.id;
+                                  
+                                  // Calculate player stats if they have played
+                                  let runs = 0;
+                                  let balls = 0;
+                                  let wickets = 0;
+                                  let overs = 0;
+                                  
+                                  if (isCurrentTeamBatting && isCurrentlyBatting) {
+                                    // Calculate batting stats for current batsmen
                                     const batsmanScores = scores.filter(score => 
-                                      score.batsman_id === batsmanId && score.inning === currentInning
+                                      score.batsman_id === player.player_id && score.inning === currentInning
                                     );
-                                    const runs = batsmanScores.reduce((total, score) => total + (score.runs || 0), 0);
-                                    const balls = batsmanScores.filter(score => 
+                                    runs = batsmanScores.reduce((total, score) => total + (score.runs || 0), 0);
+                                    balls = batsmanScores.filter(score => 
                                       !score.extras_type || ['bye', 'leg_bye'].includes(score.extras_type)
                                     ).length;
-                                    
-                                    return (
-                                      <div key={player.id} className="flex items-center justify-between">
-                                        <div className="flex items-center gap-2">
-                                          <Avatar className="h-8 w-8">
-                                            <AvatarImage src={player.player.image_url || ''} />
-                                            <AvatarFallback className="text-xs">
-                                              {player.player.name?.charAt(0)?.toUpperCase()}
-                                            </AvatarFallback>
-                                          </Avatar>
-                                          <span className="text-sm font-medium">
-                                            {player.player.name} {runs}({balls}){index === 0 ? '*' : ''}
-                                          </span>
-                                        </div>
-                                      </div>
+                                  } else if (isCurrentTeamBatting && !isCurrentlyBatting) {
+                                    // Calculate bowling stats for current bowlers
+                                    const bowlerScores = scores.filter(score => 
+                                      score.bowler_id === player.player_id && score.inning === currentInning
                                     );
-                                  })}
-                                  {/* Show current bowler */}
-                                  {selectedBowler && (
-                                    <div className="mt-3 pt-2 border-t">
-                                      <p className="text-xs text-muted-foreground mb-1">Current Bowler</p>
-                                      {(() => {
-                                        const bowler = teamBPlayers.find(p => p.player_id === selectedBowler);
-                                        if (!bowler) return null;
-                                        
-                                        // Calculate bowler stats from scores
-                                        const bowlerScores = scores.filter(score => 
-                                          score.bowler_id === selectedBowler && score.inning === currentInning
-                                        );
-                                        const balls = bowlerScores.length;
-                                        const wickets = bowlerScores.filter(score => score.wicket_type).length;
-                                        
-                                        return (
-                                          <div className="flex items-center justify-between">
-                                            <div className="flex items-center gap-2">
-                                              <Avatar className="h-6 w-6">
-                                                <AvatarImage src={bowler.player.image_url || ''} />
-                                                <AvatarFallback className="text-xs">
-                                                  {bowler.player.name?.charAt(0)?.toUpperCase()}
-                                                </AvatarFallback>
-                                              </Avatar>
-                                              <span className="text-sm">{bowler.player.name}</span>
-                                            </div>
-                                            <span className="text-xs text-muted-foreground">
-                                              {balls} balls/{wickets} wickets
-                                            </span>
-                                          </div>
-                                        );
-                                      })()}
+                                    wickets = bowlerScores.filter(score => score.wicket_type).length;
+                                    overs = Math.floor(bowlerScores.length / 6) + (bowlerScores.length % 6) / 10;
+                                  }
+                                  
+                                  return (
+                                    <div key={player.id} className="flex items-center justify-between py-2 relative border-b border-gray-200 last:border-b-0">
+                                      <div className="flex items-center gap-2">
+                                        <Avatar className="h-8 w-8">
+                                          <AvatarImage src={player.player.image_url || ''} />
+                                          <AvatarFallback className="text-xs">
+                                            {player.player.name?.charAt(0)?.toUpperCase()}
+                                          </AvatarFallback>
+                                        </Avatar>
+                                        <span className="text-sm font-medium">
+                                          {player.player.name}
+                                          {isCurrentlyBatting && isCurrentTeamBatting && (
+                                            <span className="text-green-600 ml-1">*</span>
+                                          )}
+                                        </span>
+                                      </div>
+                                      <div className="text-right">
+                                        {isCurrentTeamBatting && isCurrentlyBatting ? (
+                                          <span className="text-sm font-mono">
+                                            {runs}({balls})
+                                          </span>
+                                        ) : isCurrentTeamBatting && !isCurrentlyBatting ? (
+                                          <span className="text-sm text-muted-foreground">
+                                            {wickets}/{overs.toFixed(1)}
+                                          </span>
+                                        ) : (
+                                          <span className="text-sm text-muted-foreground">
+                                            {isCurrentlyBatting ? 'Yet to bat' : ''}
+                                          </span>
+                                        )}
+                                      </div>
                                     </div>
-                                  )}
-                                </>
-                              )}
-                              {/* Show team score if not batting */}
-                              {(currentInning !== 1 || battingTeam?.id !== match.team_a.id) && (
-                                <div className="text-center py-4">
-                                  <p className="text-sm text-muted-foreground">
-                                    {currentInning === 1 ? 'Yet to bat' : 'Completed innings'}
-                                  </p>
-                                </div>
-                              )}
+                                  );
+                                })}
                             </div>
                           </div>
 
+                          {/* Team B */}
                           <div>
                             <h3 className="font-semibold mb-3">{match.team_b.name}</h3>
-                            <div className="space-y-2">
-                              {/* Show only current batsmen if this team is batting */}
-                              {currentInning === 2 && battingTeam?.id === match.team_b.id && (
-                                <>
-                                  {selectedBatsmen && selectedBatsmen.length > 0 && selectedBatsmen.map((batsmanId, index) => {
-                                    const player = teamBPlayers.find(p => p.player_id === batsmanId);
-                                    if (!player) return null;
-                                    
-                                    // Calculate individual batsman stats from scores
+                            <div className="space-y-0">
+                              {teamBPlayers
+                                .filter(p => p.is_playing_xi)
+                                .sort((a, b) => {
+                                  // Sort currently playing players first
+                                  const aIsPlaying = selectedBatsmen && selectedBatsmen.includes(a.player_id);
+                                  const bIsPlaying = selectedBatsmen && selectedBatsmen.includes(b.player_id);
+                                  if (aIsPlaying && !bIsPlaying) return -1;
+                                  if (!aIsPlaying && bIsPlaying) return 1;
+                                  return 0;
+                                })
+                                .map((player, index) => {
+                                  // Check if this player is currently batting
+                                  const isCurrentlyBatting = selectedBatsmen && selectedBatsmen.includes(player.player_id);
+                                  const isCurrentTeamBatting = currentInning === 2 && battingTeam?.id === match.team_b.id;
+                                  
+                                  // Calculate player stats if they have played
+                                  let runs = 0;
+                                  let balls = 0;
+                                  let wickets = 0;
+                                  let overs = 0;
+                                  
+                                  if (isCurrentTeamBatting && isCurrentlyBatting) {
+                                    // Calculate batting stats for current batsmen
                                     const batsmanScores = scores.filter(score => 
-                                      score.batsman_id === batsmanId && score.inning === currentInning
+                                      score.batsman_id === player.player_id && score.inning === currentInning
                                     );
-                                    const runs = batsmanScores.reduce((total, score) => total + (score.runs || 0), 0);
-                                    const balls = batsmanScores.filter(score => 
+                                    runs = batsmanScores.reduce((total, score) => total + (score.runs || 0), 0);
+                                    balls = batsmanScores.filter(score => 
                                       !score.extras_type || ['bye', 'leg_bye'].includes(score.extras_type)
                                     ).length;
-                                    
-                                    return (
-                                      <div key={player.id} className="flex items-center justify-between">
-                                        <div className="flex items-center gap-2">
-                                          <Avatar className="h-8 w-8">
-                                            <AvatarImage src={player.player.image_url || ''} />
-                                            <AvatarFallback className="text-xs">
-                                              {player.player.name?.charAt(0)?.toUpperCase()}
-                                            </AvatarFallback>
-                                          </Avatar>
-                                          <span className="text-sm font-medium">
-                                            {player.player.name} {runs}({balls}){index === 0 ? '*' : ''}
-                                          </span>
-                                        </div>
-                                      </div>
+                                  } else if (isCurrentTeamBatting && !isCurrentlyBatting) {
+                                    // Calculate bowling stats for current bowlers
+                                    const bowlerScores = scores.filter(score => 
+                                      score.bowler_id === player.player_id && score.inning === currentInning
                                     );
-                                  })}
-                                  {/* Show current bowler */}
-                                  {selectedBowler && (
-                                    <div className="mt-3 pt-2 border-t">
-                                      <p className="text-xs text-muted-foreground mb-1">Current Bowler</p>
-                                      {(() => {
-                                        const bowler = teamAPlayers.find(p => p.player_id === selectedBowler);
-                                        if (!bowler) return null;
-                                        
-                                        // Calculate bowler stats from scores
-                                        const bowlerScores = scores.filter(score => 
-                                          score.bowler_id === selectedBowler && score.inning === currentInning
-                                        );
-                                        const balls = bowlerScores.length;
-                                        const wickets = bowlerScores.filter(score => score.wicket_type).length;
-                                        
-                                        return (
-                                          <div className="flex items-center justify-between">
-                                            <div className="flex items-center gap-2">
-                                              <Avatar className="h-6 w-6">
-                                                <AvatarImage src={bowler.player.image_url || ''} />
-                                                <AvatarFallback className="text-xs">
-                                                  {bowler.player.name?.charAt(0)?.toUpperCase()}
-                                                </AvatarFallback>
-                                              </Avatar>
-                                              <span className="text-sm">{bowler.player.name}</span>
-                                            </div>
-                                            <span className="text-xs text-muted-foreground">
-                                              {balls} balls/{wickets} wickets
-                                            </span>
-                                          </div>
-                                        );
-                                      })()}
+                                    wickets = bowlerScores.filter(score => score.wicket_type).length;
+                                    overs = Math.floor(bowlerScores.length / 6) + (bowlerScores.length % 6) / 10;
+                                  }
+                                  
+                                  return (
+                                    <div key={player.id} className="flex items-center justify-between py-2 relative border-b border-gray-200 last:border-b-0">
+                                      <div className="flex items-center gap-2">
+                                        <Avatar className="h-8 w-8">
+                                          <AvatarImage src={player.player.image_url || ''} />
+                                          <AvatarFallback className="text-xs">
+                                            {player.player.name?.charAt(0)?.toUpperCase()}
+                                          </AvatarFallback>
+                                        </Avatar>
+                                        <span className="text-sm font-medium">
+                                          {player.player.name}
+                                          {isCurrentlyBatting && isCurrentTeamBatting && (
+                                            <span className="text-green-600 ml-1">*</span>
+                                          )}
+                                        </span>
+                                      </div>
+                                      <div className="text-right">
+                                        {isCurrentTeamBatting && isCurrentlyBatting ? (
+                                          <span className="text-sm font-mono">
+                                            {runs}({balls})
+                                          </span>
+                                        ) : isCurrentTeamBatting && !isCurrentlyBatting ? (
+                                          <span className="text-sm text-muted-foreground">
+                                            {wickets}/{overs.toFixed(1)}
+                                          </span>
+                                        ) : (
+                                          <span className="text-sm text-muted-foreground">
+                                            {isCurrentlyBatting ? 'Yet to bat' : ''}
+                                          </span>
+                                        )}
+                                      </div>
                                     </div>
-                                  )}
-                                </>
-                              )}
-                              {/* Show team score if not batting */}
-                              {(currentInning !== 2 || battingTeam?.id !== match.team_b.id) && (
-                                <div className="text-center py-4">
-                                  <p className="text-sm text-muted-foreground">
-                                    {currentInning === 1 ? 'Yet to bat' : 'Completed innings'}
-                                  </p>
-                                </div>
-                              )}
+                                  );
+                                })}
                             </div>
                           </div>
                         </div>
@@ -772,7 +736,11 @@ const MatchDetail = () => {
                       try {
                         const { error } = await supabase
                           .from('matches')
-                          .update({ status: 'in_progress' })
+                          .update({ 
+                            status: 'in_progress',
+                            current_batsmen: batsmen,
+                            current_bowler_id: bowler
+                          })
                           .eq('id', match.id);
                         if (error) throw error;
                         setMatch(prev => prev ? { ...prev, status: 'in_progress' } : prev);
@@ -785,6 +753,7 @@ const MatchDetail = () => {
                   />
                 ) : match.status === 'in_progress' && battingTeam && bowlingTeam ? (
                   <LiveScoring
+                    key={`${match.id}-${currentInning}-${battingTeam?.id}`}
                     matchId={match.id}
                     currentInning={currentInning}
                     currentOver={currentOver}

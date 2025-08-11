@@ -367,6 +367,30 @@ const TeamDetail = () => {
   const updatePlayerRole = async (memberId: string, newRole: string) => {
     setUpdatingRole(memberId);
     try {
+      // If making someone captain, first demote current captain
+      if (newRole === 'captain') {
+        // Find current captain
+        const currentCaptain = members.find(m => m.role === 'captain');
+        if (currentCaptain) {
+          // Demote current captain to player
+          const { error: demoteError } = await supabase
+            .from('team_players')
+            .update({ role: 'player' })
+            .eq('id', currentCaptain.id);
+
+          if (demoteError) throw demoteError;
+        }
+
+        // Update team captain_id
+        const { error: teamError } = await supabase
+          .from('teams')
+          .update({ captain_id: members.find(m => m.id === memberId)?.player_id })
+          .eq('id', teamId);
+
+        if (teamError) throw teamError;
+      }
+
+      // Update the player's role
       const { error } = await supabase
         .from('team_players')
         .update({ role: newRole })
@@ -377,7 +401,9 @@ const TeamDetail = () => {
       await fetchTeamData();
       toast({
         title: "Success",
-        description: "Player role updated successfully!"
+        description: newRole === 'captain' 
+          ? "New captain appointed successfully!" 
+          : "Player role updated successfully!"
       });
     } catch (error) {
       console.error('Error updating role:', error);
@@ -484,7 +510,7 @@ const TeamDetail = () => {
   return (
     <div className="min-h-screen bg-background">
       <Navigation />
-      <div className="container mx-auto px-4 py-8">
+      <div className="container mx-auto px-3 sm:px-4 py-4 sm:py-8">
         <PageHeader
           title={team.name}
           subtitle="Team Details & Management"
@@ -492,7 +518,7 @@ const TeamDetail = () => {
           backUrl="/teams"
         />
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6 lg:gap-8">
           {/* Team Info */}
           <div className="lg:col-span-1">
             <Card>
@@ -525,7 +551,7 @@ const TeamDetail = () => {
                         Add Player
                       </Button>
                     </DialogTrigger>
-                    <DialogContent className="max-w-2xl">
+                    <DialogContent className="max-w-2xl w-[95vw] sm:w-auto">
                       <DialogHeader>
                         <DialogTitle>Add Player to Team</DialogTitle>
                         <DialogDescription>
@@ -586,7 +612,7 @@ const TeamDetail = () => {
                                 {searchResults.map((player) => (
                                   <div
                                     key={player.id}
-                                    className="flex items-center justify-between p-3 border rounded-lg"
+                                    className="flex flex-col sm:flex-row sm:items-center justify-between p-3 border rounded-lg gap-3 sm:gap-0"
                                   >
                                     <div className="flex items-center gap-3">
                                       <Avatar className="h-8 w-8">
@@ -611,6 +637,7 @@ const TeamDetail = () => {
                                       size="sm"
                                       onClick={() => addPlayerToTeam(player.id)}
                                       disabled={addingPlayer === player.id}
+                                      className="sm:self-end"
                                     >
                                       {addingPlayer === player.id ? (
                                         <Loader2 className="h-4 w-4 animate-spin" />
@@ -721,7 +748,7 @@ const TeamDetail = () => {
                     members.map((member) => (
                     <div
                       key={member.id}
-                      className="flex items-center justify-between p-4 border rounded-lg"
+                      className="flex flex-col sm:flex-row sm:items-center justify-between p-3 sm:p-4 border rounded-lg gap-3 sm:gap-0"
                     >
                       <div className="flex items-center gap-3">
                         <Avatar className="h-10 w-10">
@@ -737,32 +764,54 @@ const TeamDetail = () => {
                           </p>
                         </div>
                       </div>
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 sm:flex-shrink-0">
                         {member.role !== 'captain' ? (
-                          <Select
-                            value={member.role}
-                            onValueChange={(value) => updatePlayerRole(member.id, value)}
-                            disabled={updatingRole === member.id}
-                          >
-                            <SelectTrigger className="w-32">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="player">Player</SelectItem>
-                              <SelectItem value="vice_captain">Vice Captain</SelectItem>
-                            </SelectContent>
-                          </Select>
+                          <div className="flex items-center gap-2">
+                            <Select
+                              value={member.role}
+                              onValueChange={(value) => updatePlayerRole(member.id, value)}
+                              disabled={updatingRole === member.id}
+                            >
+                              <SelectTrigger className="w-28 sm:w-32">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="player">Player</SelectItem>
+                                <SelectItem value="vice_captain">Vice Captain</SelectItem>
+                                <SelectItem value="captain">Make Captain</SelectItem>
+                              </SelectContent>
+                            </Select>
+                            <AlertDialog>
+                              <AlertDialogTrigger asChild>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  className="text-destructive hover:text-destructive"
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                              </AlertDialogTrigger>
+                              <AlertDialogContent>
+                                <AlertDialogHeader>
+                                  <AlertDialogTitle>Remove Player</AlertDialogTitle>
+                                  <AlertDialogDescription>
+                                    Are you sure you want to remove <strong>{member.player.name}</strong> from the team? This action cannot be undone.
+                                  </AlertDialogDescription>
+                                </AlertDialogHeader>
+                                <AlertDialogFooter>
+                                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                  <AlertDialogAction 
+                                    onClick={() => removePlayerFromTeam(member.id)} 
+                                    className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                                  >
+                                    Remove Player
+                                  </AlertDialogAction>
+                                </AlertDialogFooter>
+                              </AlertDialogContent>
+                            </AlertDialog>
+                          </div>
                         ) : (
                           getRoleBadge(member.role)
-                        )}
-                        {member.role !== 'captain' && (
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => removePlayerFromTeam(member.id)}
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
                         )}
                       </div>
                     </div>

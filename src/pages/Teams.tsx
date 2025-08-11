@@ -10,7 +10,7 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Checkbox } from '@/components/ui/checkbox';
 import { useToast } from '@/hooks/use-toast';
-import { Loader2, Plus, Users, Crown, UserPlus } from 'lucide-react';
+import { Loader2, Plus, Users, Crown } from 'lucide-react';
 import Navigation from '@/components/Navigation';
 import PageHeader from '@/components/PageHeader';
 import { Link } from 'react-router-dom';
@@ -28,8 +28,6 @@ interface Team {
     image_url: string | null;
   };
   player_count: number;
-  is_member: boolean;
-  is_captain: boolean;
 }
 
 const Teams = () => {
@@ -38,7 +36,6 @@ const Teams = () => {
   const [teams, setTeams] = useState<Team[]>([]);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
-  const [joining, setJoining] = useState<string | null>(null);
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [formData, setFormData] = useState({
     name: '',
@@ -75,26 +72,13 @@ const Teams = () => {
 
       if (error) throw error;
 
-      // Check if user is a member of each team
-      const teamsWithMembership = await Promise.all(
-        teamsData.map(async (team) => {
-          const { data: membership } = await supabase
-            .from('team_players')
-            .select('role')
-            .eq('team_id', team.id)
-            .eq('player_id', profile.id)
-            .single();
+      // Add player count to teams
+      const teamsWithPlayerCount = teamsData.map((team) => ({
+        ...team,
+        player_count: team.team_players?.[0]?.count || 0
+      }));
 
-          return {
-            ...team,
-            player_count: team.team_players?.[0]?.count || 0,
-            is_member: !!membership,
-            is_captain: membership?.role === 'captain'
-          };
-        })
-      );
-
-      setTeams(teamsWithMembership);
+      setTeams(teamsWithPlayerCount);
     } catch (error) {
       console.error('Error fetching teams:', error);
       toast({
@@ -176,47 +160,7 @@ const Teams = () => {
     }
   };
 
-  const handleJoinTeam = async (teamId: string) => {
-    if (!user) return;
 
-    setJoining(teamId);
-    try {
-      // Get user's profile ID
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('id')
-        .eq('user_id', user.id)
-        .single();
-
-      if (!profile) throw new Error('Profile not found');
-
-      // Add player to team
-      const { error } = await supabase
-        .from('team_players')
-        .insert({
-          team_id: teamId,
-          player_id: profile.id,
-          role: 'player'
-        });
-
-      if (error) throw error;
-
-      await fetchTeams();
-      toast({
-        title: "Success",
-        description: "Joined team successfully!"
-      });
-    } catch (error) {
-      console.error('Error joining team:', error);
-      toast({
-        title: "Error",
-        description: "Failed to join team",
-        variant: "destructive"
-      });
-    } finally {
-      setJoining(null);
-    }
-  };
 
   if (loading) {
     return (
@@ -232,10 +176,10 @@ const Teams = () => {
   return (
     <div className="min-h-screen bg-background">
       <Navigation />
-      <div className="container mx-auto px-4 py-8">
+      <div className="container mx-auto px-3 sm:px-4 py-4 sm:py-8">
         <PageHeader
           title="Teams"
-          subtitle="Create, join, and manage cricket teams"
+          subtitle="Create and manage cricket teams"
         />
         
         <div className="flex justify-end mb-8">
@@ -320,7 +264,7 @@ const Teams = () => {
               <Users className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
               <h3 className="text-lg font-semibold mb-2">No Teams Yet</h3>
               <p className="text-muted-foreground mb-4">
-                Be the first to create a team or wait for others to create teams you can join.
+                Be the first to create a team or wait for others to create teams.
               </p>
               <Button onClick={() => setShowCreateDialog(true)}>
                 <Plus className="h-4 w-4 mr-2" />
@@ -329,61 +273,45 @@ const Teams = () => {
             </CardContent>
           </Card>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
             {teams.map((team) => (
               <Card key={team.id} className="relative">
-                <CardHeader>
+                <CardHeader className="pb-2">
                   <div className="flex items-center gap-3">
-                    <Avatar className="h-12 w-12">
+                    <Avatar className="h-8 w-8">
                       <AvatarImage src={team.logo_url || ''} />
-                      <AvatarFallback className="text-lg">
+                      <AvatarFallback className="text-sm">
                         {team.name.charAt(0).toUpperCase()}
                       </AvatarFallback>
                     </Avatar>
                     <div className="flex-1 min-w-0">
-                      <CardTitle className="text-lg truncate">{team.name}</CardTitle>
-                      <CardDescription className="flex items-center gap-1">
+                      <CardTitle className="text-sm truncate">{team.name}</CardTitle>
+                      <CardDescription className="flex items-center gap-1 text-xs">
                         <Crown className="h-3 w-3" />
                         {team.captain.name}
                       </CardDescription>
                     </div>
                   </div>
                 </CardHeader>
-                <CardContent>
+                <CardContent className="pt-0 pb-3">
                   {team.description && (
-                    <p className="text-sm text-muted-foreground mb-4 line-clamp-2">
+                    <p className="text-xs text-muted-foreground mb-2 line-clamp-2">
                       {team.description}
                     </p>
                   )}
                   
                   <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-1 text-sm text-muted-foreground">
-                      <Users className="h-4 w-4" />
+                    <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                      <Users className="h-3 w-3" />
                       {team.player_count} players
                     </div>
                     
-                    <div className="flex gap-2">
-                      <Link to={`/teams/${team.id}`}>
-                        <Button variant="outline" size="sm">
-                          <Users className="h-4 w-4 mr-1" />
-                          View
-                        </Button>
-                      </Link>
-                      {!team.is_member && (
-                        <Button
-                          size="sm"
-                          onClick={() => handleJoinTeam(team.id)}
-                          disabled={joining === team.id}
-                        >
-                          {joining === team.id ? (
-                            <Loader2 className="h-4 w-4 mr-1 animate-spin" />
-                          ) : (
-                            <UserPlus className="h-4 w-4 mr-1" />
-                          )}
-                          Add
-                        </Button>
-                      )}
-                    </div>
+                    <Link to={`/teams/${team.id}`}>
+                      <Button variant="outline" size="sm" className="text-xs px-3 py-1">
+                        <Users className="h-3 w-3 mr-1" />
+                        View
+                      </Button>
+                    </Link>
                   </div>
                 </CardContent>
               </Card>

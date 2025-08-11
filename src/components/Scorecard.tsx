@@ -3,6 +3,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Trophy, Target, Users } from 'lucide-react';
+import { formatOverDisplay, overToDecimal, decimalToOver } from '@/utils/overManagement';
 
 interface Player {
   id: string;
@@ -53,6 +54,12 @@ interface ScorecardProps {
   totalOvers: number;
   teamAPlayers: MatchPlayer[];
   teamBPlayers: MatchPlayer[];
+  meta?: {
+    status: 'scheduled' | 'in_progress' | 'completed' | 'cancelled';
+    location?: string | null;
+    tossWinnerName?: string | null;
+    tossDecision?: 'bat' | 'bowl' | null;
+  };
 }
 
 const Scorecard: React.FC<ScorecardProps> = ({
@@ -64,7 +71,8 @@ const Scorecard: React.FC<ScorecardProps> = ({
   currentBall,
   totalOvers,
   teamAPlayers,
-  teamBPlayers
+  teamBPlayers,
+  meta
 }) => {
   const currentInningScores = scores.filter(s => s.inning === currentInning);
   const previousInningScores = scores.filter(s => s.inning < currentInning);
@@ -78,7 +86,10 @@ const Scorecard: React.FC<ScorecardProps> = ({
 
     const totalRuns = teamScores.reduce((sum, score) => sum + score.runs + (score.extras_runs || 0), 0);
     const wickets = teamScores.filter(s => s.wicket_type).length;
-    const overs = Math.floor(teamScores.length / 6) + (teamScores.length % 6) / 10;
+    
+    // Calculate overs properly using the utility function
+    const totalBalls = teamScores.length;
+    const overs = overToDecimal(Math.floor(totalBalls / 6), (totalBalls % 6) + 1);
 
     return { runs: totalRuns, wickets, overs };
   };
@@ -91,7 +102,7 @@ const Scorecard: React.FC<ScorecardProps> = ({
   };
 
   const formatOver = (over: number, ball: number) => {
-    return `${over}.${ball}`;
+    return formatOverDisplay(over, ball);
   };
 
   const getScoreDescription = (score: Score) => {
@@ -115,31 +126,42 @@ const Scorecard: React.FC<ScorecardProps> = ({
 
   return (
     <div className="space-y-6">
-      {/* Current Score Summary */}
+      {/* Current Score Summary (includes match meta) */}
       <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Trophy className="h-5 w-5" />
+        <CardHeader className="pb-3">
+          <CardTitle className="flex items-center gap-2 text-base">
+            <Trophy className="h-4 w-4" />
             Current Score
           </CardTitle>
+          {meta && (
+            <CardDescription className="text-xs">
+              <span className="inline-block mr-2">Status: {meta.status.replace('_', ' ')}</span>
+              {typeof meta.location === 'string' && meta.location && (
+                <span className="inline-block mr-2">• Location: {meta.location}</span>
+              )}
+              {meta.tossWinnerName && meta.tossDecision && (
+                <span className="inline-block">• Toss: {meta.tossWinnerName} ({meta.tossDecision})</span>
+              )}
+            </CardDescription>
+          )}
         </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <CardContent className="pt-0">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {/* Batting Team */}
-            <div className="space-y-4">
-              <div className="flex items-center gap-3">
-                <Avatar className="h-12 w-12">
+            <div className="space-y-2">
+              <div className="flex items-center gap-2">
+                <Avatar className="h-8 w-8">
                   <AvatarImage src={battingTeam.logo_url || ''} />
-                  <AvatarFallback className="text-lg">
+                  <AvatarFallback className="text-sm">
                     {battingTeam.name.charAt(0).toUpperCase()}
                   </AvatarFallback>
                 </Avatar>
                 <div>
-                  <h3 className="font-semibold text-lg">{battingTeam.name}</h3>
-                  <p className="text-2xl font-bold text-primary">
+                  <h3 className="font-semibold text-sm">{battingTeam.name}</h3>
+                  <p className="text-xl font-bold text-primary">
                     {currentTeamScore.runs}/{currentTeamScore.wickets}
                   </p>
-                  <p className="text-sm text-muted-foreground">
+                  <p className="text-xs text-muted-foreground">
                     Overs: {formatOver(Math.floor(currentTeamScore.overs), Math.round((currentTeamScore.overs % 1) * 6))}
                   </p>
                 </div>
@@ -147,22 +169,22 @@ const Scorecard: React.FC<ScorecardProps> = ({
             </div>
 
             {/* Bowling Team */}
-            <div className="space-y-4">
-              <div className="flex items-center gap-3">
-                <Avatar className="h-12 w-12">
+            <div className="space-y-2">
+              <div className="flex items-center gap-2">
+                <Avatar className="h-8 w-8">
                   <AvatarImage src={bowlingTeam.logo_url || ''} />
-                  <AvatarFallback className="text-lg">
+                  <AvatarFallback className="text-sm">
                     {bowlingTeam.name.charAt(0).toUpperCase()}
                   </AvatarFallback>
                 </Avatar>
                 <div>
-                  <h3 className="font-semibold text-lg">{bowlingTeam.name}</h3>
+                  <h3 className="font-semibold text-sm">{bowlingTeam.name}</h3>
                   {previousTeamScore ? (
-                    <p className="text-2xl font-bold text-primary">
+                    <p className="text-xl font-bold text-primary">
                       {previousTeamScore.runs}/{previousTeamScore.wickets}
                     </p>
                   ) : (
-                    <p className="text-sm text-muted-foreground">Yet to bat</p>
+                    <p className="text-xs text-muted-foreground">Yet to bat</p>
                   )}
                 </div>
               </div>
@@ -170,10 +192,9 @@ const Scorecard: React.FC<ScorecardProps> = ({
           </div>
 
           {/* Current Position */}
-          <div className="mt-4 p-3 ">
+          <div className="mt-3 p-2">
             <div className="flex items-center justify-between">
-              {/* <span className="text-sm font-medium">Current Position:</span> */}
-              <Badge variant="default">
+              <Badge variant="default" className="text-xs">
                 Inning {currentInning} • Over {currentOver}.{currentBall} • {totalOvers} overs match
               </Badge>
             </div>

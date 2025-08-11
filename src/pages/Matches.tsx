@@ -4,14 +4,13 @@ import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/hooks/use-toast';
-import { Loader2, Plus, Calendar, Clock, MapPin, Users, Trophy } from 'lucide-react';
+import { Loader2, Plus, Trophy } from 'lucide-react';
 import Navigation from '@/components/Navigation';
 import PageHeader from '@/components/PageHeader';
 import { Link } from 'react-router-dom';
@@ -35,9 +34,24 @@ interface Match {
   status: 'scheduled' | 'in_progress' | 'completed' | 'cancelled';
   team_a: Team;
   team_b: Team;
+  team_a_id: string;
+  team_b_id: string;
   toss_winner: Team | null;
   toss_decision: 'bat' | 'bowl' | null;
   created_at: string;
+  // Match scores for completed matches
+  team_a_score?: {
+    runs: number;
+    wickets: number;
+    overs: number;
+  };
+  team_b_score?: {
+    runs: number;
+    wickets: number;
+    overs: number;
+  };
+  winner?: Team | null;
+  result?: string;
 }
 
 const Matches = () => {
@@ -88,7 +102,17 @@ const Matches = () => {
       const { data: matchesData, error: matchesError } = await supabase
         .from('matches')
         .select(`
-          *,
+          id,
+          name,
+          date,
+          time,
+          location,
+          overs,
+          status,
+          team_a_id,
+          team_b_id,
+          toss_decision,
+          created_at,
           team_a:teams!matches_team_a_id_fkey(
             id,
             name,
@@ -111,7 +135,142 @@ const Matches = () => {
         .order('date', { ascending: false });
 
       if (matchesError) throw matchesError;
-      setMatches(matchesData || []);
+
+      // Normalize the data to ensure single objects instead of arrays
+      const normalizedMatches = (matchesData || []).map((match: any) => ({
+        ...match,
+        team_a: Array.isArray(match.team_a) ? match.team_a[0] : match.team_a,
+        team_b: Array.isArray(match.team_b) ? match.team_b[0] : match.team_b,
+        toss_winner: Array.isArray(match.toss_winner) ? match.toss_winner[0] : match.toss_winner
+      }));
+
+      // Fetch match scores for completed matches
+      const completedMatchIds = normalizedMatches?.filter(m => m.status === 'completed').map(m => m.id) || [];
+      let matchScores: any = {};
+      
+      if (completedMatchIds.length > 0) {
+        // First fetch team players to determine team membership
+        const { data: teamPlayersData, error: teamPlayersError } = await supabase
+          .from('match_players')
+          .select(`
+            match_id,
+            player_id,
+            team_id,
+            teams!match_players_team_id_fkey(id, name)
+          `)
+          .in('match_id', completedMatchIds);
+
+        if (teamPlayersError) {
+          console.error('Error fetching team players:', teamPlayersError);
+        }
+
+        // Create a map of player_id to team_id for each match
+        const playerTeamMap: { [matchId: string]: { [playerId: string]: string } } = {};
+        teamPlayersData?.forEach((player: any) => {
+          if (!playerTeamMap[player.match_id]) {
+            playerTeamMap[player.match_id] = {};
+          }
+          playerTeamMap[player.match_id][player.player_id] = player.team_id;
+        });
+
+        const { data: scoresData, error: scoresError } = await supabase
+          .from('match_scores')
+          .select('*')
+          .in('match_id', completedMatchIds);
+
+        if (scoresError) {
+          console.error('Error fetching scores:', scoresError);
+        }
+
+        // Process scores to get team totals
+        if (scoresData && scoresData.length > 0) {
+          scoresData.forEach((score: any) => {
+            if (!matchScores[score.match_id]) {
+              matchScores[score.match_id] = { team_a: { runs: 0, wickets: 0, overs: 0 }, team_b: { runs: 0, wickets: 0, overs: 0 } };
+            }
+            
+            // Determine which team this score belongs to
+            const match = normalizedMatches.find(m => m.id === score.match_id);
+            if (!match) return;
+            
+            const playerTeamMapForMatch = playerTeamMap[score.match_id] || {};
+            
+            // For batting scores, add runs to the batting team
+            if (score.batsman_id && score.runs) {
+              const playerTeamId = playerTeamMapForMatch[score.batsman_id];
+              
+              if (playerTeamId === match.team_a_id) {
+                matchScores[score.match_id].team_a.runs += score.runs;
+              } else if (playerTeamId === match.team_b_id) {
+                matchScores[score.match_id].team_b.runs += score.runs;
+              }
+            }
+            
+            // For bowling scores, add wickets to the bowling team
+            if (score.bowler_id && score.wicket_type && score.wicket_type !== 'run_out') {
+              const playerTeamId = playerTeamMapForMatch[score.bowler_id];
+              if (playerTeamId === match.team_a_id) {
+                matchScores[score.match_id].team_a.wickets += 1;
+              } else if (playerTeamId === match.team_b_id) {
+                matchScores[score.match_id].team_b.wickets += 1;
+              }
+            }
+            
+            // Calculate overs from ball numbers
+            if (score.ball_number) {
+              const currentOvers = Math.floor(score.ball_number / 6) + (score.ball_number % 6) / 10;
+              
+              // Determine which team was batting (based on batsman)
+              if (score.batsman_id) {
+                const playerTeamId = playerTeamMapForMatch[score.batsman_id];
+                if (playerTeamId === match.team_a_id) {
+                  matchScores[score.match_id].team_a.overs = Math.max(matchScores[score.match_id].team_a.overs, currentOvers);
+                } else if (playerTeamId === match.team_b_id) {
+                  matchScores[score.match_id].team_b.overs = Math.max(matchScores[score.match_id].team_b.overs, currentOvers);
+                }
+              }
+            }
+          });
+        }
+      }
+
+      // Combine match data with scores
+      const matchesWithScores = (normalizedMatches || []).map(match => {
+        const scores = matchScores[match.id];
+        
+        if (!scores) return match;
+
+        // Determine winner and result
+        let winner = null;
+        let result = '';
+        
+        if (match.status === 'completed' && scores.team_a && scores.team_b) {
+          if (scores.team_a.runs > scores.team_b.runs) {
+            winner = match.team_a;
+            const margin = scores.team_a.runs - scores.team_b.runs;
+            result = `${match.team_a.name} won by ${margin} runs`;
+          } else if (scores.team_b.runs > scores.team_a.runs) {
+            winner = match.team_b;
+            const margin = scores.team_b.runs - scores.team_a.runs;
+            result = `${match.team_b.name} won by ${margin} runs`;
+          }
+        }
+
+        return {
+          ...match,
+          team_a_score: scores.team_a,
+          team_b_score: scores.team_b,
+          winner,
+          result
+        };
+      });
+
+      // Ensure unique matches by ID
+      const uniqueMatches = matchesWithScores.filter((match, index, self) => 
+        index === self.findIndex(m => m.id === match.id)
+      );
+
+      setMatches(uniqueMatches);
     } catch (error) {
       console.error('Error fetching data:', error);
       toast({
@@ -127,6 +286,32 @@ const Matches = () => {
   const handleCreateMatch = async () => {
     if (!user || !formData.name.trim() || !formData.team_a_id || !formData.team_b_id) return;
 
+    // Check if a match with the same name already exists
+    const existingMatch = matches.find(m => 
+      m.name.toLowerCase() === formData.name.trim().toLowerCase() ||
+      (m.team_a_id === formData.team_a_id && m.team_b_id === formData.team_b_id && m.date === formData.date) ||
+      (m.team_a_id === formData.team_b_id && m.team_b_id === formData.team_a_id && m.date === formData.date)
+    );
+
+    if (existingMatch) {
+      toast({
+        title: "Error",
+        description: "A match with this name or between these teams on this date already exists",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    // Check if teams are different
+    if (formData.team_a_id === formData.team_b_id) {
+      toast({
+        title: "Error",
+        description: "Team A and Team B must be different",
+        variant: "destructive"
+      });
+      return;
+    }
+
     setCreating(true);
     try {
       // Get user's profile ID
@@ -138,11 +323,16 @@ const Matches = () => {
 
       if (!profile) throw new Error('Profile not found');
 
+      // Create match with a more descriptive name if none provided
+      const teamAName = teams.find(t => t.id === formData.team_a_id)?.name || 'Team A';
+      const teamBName = teams.find(t => t.id === formData.team_b_id)?.name || 'Team B';
+      const matchName = formData.name.trim() || `${teamAName} vs ${teamBName}`;
+      
       // Create match
       const { data: match, error } = await supabase
         .from('matches')
         .insert({
-          name: formData.name.trim(),
+          name: matchName,
           date: formData.date,
           time: formData.time,
           location: formData.location.trim() || null,
@@ -184,21 +374,6 @@ const Matches = () => {
     }
   };
 
-  const getStatusBadge = (status: string) => {
-    switch (status) {
-      case 'scheduled':
-        return <Badge variant="secondary">Scheduled</Badge>;
-      case 'in_progress':
-        return <Badge variant="default">In Progress</Badge>;
-      case 'completed':
-        return <Badge variant="outline">Completed</Badge>;
-      case 'cancelled':
-        return <Badge variant="destructive">Cancelled</Badge>;
-      default:
-        return <Badge variant="secondary">{status}</Badge>;
-    }
-  };
-
   const formatDate = (dateString: string) => {
     return new Date(dateString).toLocaleDateString('en-US', {
       weekday: 'short',
@@ -233,7 +408,7 @@ const Matches = () => {
       <div className="container mx-auto px-4 py-8">
         <PageHeader
           title="Matches"
-          subtitle="Schedule and manage cricket matches"
+          subtitle="View completed matches and upcoming fixtures"
         />
         
         <div className="flex justify-end mb-8">
@@ -244,27 +419,33 @@ const Matches = () => {
                 Create Match
               </Button>
             </DialogTrigger>
-            <DialogContent className="max-w-2xl">
+            <DialogContent className="sm:max-w-[425px]">
               <DialogHeader>
                 <DialogTitle>Create New Match</DialogTitle>
                 <DialogDescription>
                   Schedule a new cricket match between two teams.
                 </DialogDescription>
               </DialogHeader>
-              <div className="space-y-4">
-                <div className="space-y-2">
-                  <Label htmlFor="match-name">Match Name</Label>
-                  <Input
-                    id="match-name"
-                    value={formData.name}
-                    onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
-                    placeholder="e.g., Team A vs Team B"
-                  />
+              <div className="grid gap-4 py-4">
+                <div className="grid grid-cols-4 items-center gap-4">
+                  <Label htmlFor="match-name" className="text-right">
+                    Match Name
+                  </Label>
+                  <div className="col-span-3">
+                    <Input
+                      id="match-name"
+                      value={formData.name}
+                      onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
+                      placeholder="e.g., Team A vs Team B"
+                    />
+                  </div>
                 </div>
-                
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="match-date">Date</Label>
+
+                <div className="grid grid-cols-4 items-center gap-4">
+                  <Label htmlFor="match-date" className="text-right">
+                    Date
+                  </Label>
+                  <div className="col-span-3">
                     <Input
                       id="match-date"
                       type="date"
@@ -272,8 +453,13 @@ const Matches = () => {
                       onChange={(e) => setFormData(prev => ({ ...prev, date: e.target.value }))}
                     />
                   </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="match-time">Time</Label>
+                </div>
+
+                <div className="grid grid-cols-4 items-center gap-4">
+                  <Label htmlFor="match-time" className="text-right">
+                    Time
+                  </Label>
+                  <div className="col-span-3">
                     <Input
                       id="match-time"
                       type="time"
@@ -283,23 +469,26 @@ const Matches = () => {
                   </div>
                 </div>
 
-                <div className="space-y-2">
-                  <Label htmlFor="match-location">Location (Optional)</Label>
-                  <Input
-                    id="match-location"
-                    value={formData.location}
-                    onChange={(e) => setFormData(prev => ({ ...prev, location: e.target.value }))}
-                    placeholder="e.g., Central Cricket Ground"
-                  />
+                <div className="grid grid-cols-4 items-center gap-4">
+                  <Label htmlFor="match-location" className="text-right">
+                    Location
+                  </Label>
+                  <div className="col-span-3">
+                    <Input
+                      id="match-location"
+                      value={formData.location}
+                      onChange={(e) => setFormData(prev => ({ ...prev, location: e.target.value }))}
+                      placeholder="e.g., Cricket Ground"
+                    />
+                  </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="team-a">Team A</Label>
-                    <Select
-                      value={formData.team_a_id}
-                      onValueChange={(value) => setFormData(prev => ({ ...prev, team_a_id: value }))}
-                    >
+                <div className="grid grid-cols-4 items-center gap-4">
+                  <Label htmlFor="team-a" className="text-right">
+                    Team A
+                  </Label>
+                  <div className="col-span-3">
+                    <Select value={formData.team_a_id} onValueChange={(value) => setFormData(prev => ({ ...prev, team_a_id: value }))}>
                       <SelectTrigger>
                         <SelectValue placeholder="Select Team A" />
                       </SelectTrigger>
@@ -312,12 +501,14 @@ const Matches = () => {
                       </SelectContent>
                     </Select>
                   </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="team-b">Team B</Label>
-                    <Select
-                      value={formData.team_b_id}
-                      onValueChange={(value) => setFormData(prev => ({ ...prev, team_b_id: value }))}
-                    >
+                </div>
+
+                <div className="grid grid-cols-4 items-center gap-4">
+                  <Label htmlFor="team-b" className="text-right">
+                    Team B
+                  </Label>
+                  <div className="col-span-3">
+                    <Select value={formData.team_b_id} onValueChange={(value) => setFormData(prev => ({ ...prev, team_b_id: value }))}>
                       <SelectTrigger>
                         <SelectValue placeholder="Select Team B" />
                       </SelectTrigger>
@@ -390,68 +581,95 @@ const Matches = () => {
           </Card>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {matches.map((match) => (
-              <Card key={match.id} className="relative">
-                <CardHeader>
+            {matches.map((match, index) => (
+              <Card key={`${match.id}-${index}`} className="relative bg-gray-50">
+                {/* Header with tournament info and RESULT badge */}
+                <CardHeader className="pb-3">
                   <div className="flex items-center justify-between">
                     <div className="flex-1 min-w-0">
-                      <CardTitle className="text-lg truncate">{match.name}</CardTitle>
-                      <CardDescription className="flex items-center gap-1">
-                        <Calendar className="h-3 w-3" />
-                        {formatDate(match.date)} at {formatTime(match.time)}
+                      <CardTitle className="text-base font-semibold text-gray-900 mb-1">
+                        {match.name || `${match.team_a.name} vs ${match.team_b.name}`}
+                      </CardTitle>
+                      <CardTitle className="text-sm font-medium text-gray-600">
+                        {match.status === 'completed' ? 'Match Ended' : 
+                         match.status === 'in_progress' ? 'Match Started' : 'Upcoming Match'}
+                      </CardTitle>
+                      <CardDescription className="text-xs text-gray-500 mt-1">
+                        {match.location || 'Venue TBD'} | {formatDate(match.date)} | {match.overs} Ov.
                       </CardDescription>
+                      <div className="text-xs text-gray-400 mt-1">
+                        {formatTime(match.time)}
+                      </div>
                     </div>
-                    {getStatusBadge(match.status)}
+                    {match.status === 'completed' && (
+                      <Badge className="bg-green-100 text-green-800 text-xs font-medium px-2 py-1">
+                        RESULT
+                      </Badge>
+                    )}
                   </div>
                 </CardHeader>
-                <CardContent>
-                  {match.location && (
-                    <div className="flex items-center gap-1 text-sm text-muted-foreground mb-4">
-                      <MapPin className="h-3 w-3" />
-                      {match.location}
+
+                <CardContent className="pt-0">
+                  {/* Team scores for completed matches */}
+                  {match.status === 'completed' && match.team_a_score && match.team_b_score ? (
+                    <div className="space-y-3">
+                      {/* Team A Score */}
+                      <div className="flex items-center justify-between">
+                        <span className="font-semibold text-sm">{match.team_a.name}</span>
+                        <span className="font-mono text-sm">
+                          {match.team_a_score.runs}/{match.team_a_score.wickets} ({match.team_a_score.overs.toFixed(1)} Ov)
+                        </span>
+                      </div>
+
+                      {/* Team B Score */}
+                      <div className="flex items-center justify-between">
+                        <span className="font-semibold text-sm">{match.team_b.name}</span>
+                        <span className="font-mono text-sm">
+                          {match.team_b_score.runs}/{match.team_b_score.wickets} ({match.team_b_score.overs.toFixed(1)} Ov)
+                        </span>
+                      </div>
+
+                      {/* Match Result */}
+                      {match.result && (
+                        <div className="text-center py-2 bg-white rounded-md">
+                          <p className="text-sm font-medium text-gray-800">{match.result}</p>
+                        </div>
+                      )}
+                    </div>
+                  ) : match.status === 'completed' ? (
+                    /* Fallback for completed matches without calculated scores */
+                    <div className="space-y-3">
+                      <div className="text-center py-2 bg-yellow-50 rounded-md">
+                        <p className="text-sm text-yellow-800">Match completed but no scores calculated</p>
+                      </div>
+                    </div>
+                  ) : (
+                    /* Upcoming/Scheduled match display */
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <span className="font-semibold text-sm">{match.team_a.name}</span>
+                        <span className="font-mono text-sm text-gray-500">0/0 (0.0 Ov)</span>
+                      </div>
+                      
+                      <div className="flex items-center justify-between">
+                        <span className="font-semibold text-sm">{match.team_b.name}</span>
+                        <span className="font-mono text-sm text-gray-500">0/0 (0.0 Ov)</span>
+                      </div>
                     </div>
                   )}
                   
-                  <div className="space-y-3">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <Avatar className="h-8 w-8">
-                          <AvatarImage src={match.team_a.logo_url || ''} />
-                          <AvatarFallback className="text-xs">
-                            {match.team_a.name.charAt(0).toUpperCase()}
-                          </AvatarFallback>
-                        </Avatar>
-                        <span className="font-medium">{match.team_a.name}</span>
-                      </div>
-                      <span className="text-sm text-muted-foreground">vs</span>
-                      <div className="flex items-center gap-2">
-                        <span className="font-medium">{match.team_b.name}</span>
-                        <Avatar className="h-8 w-8">
-                          <AvatarImage src={match.team_b.logo_url || ''} />
-                          <AvatarFallback className="text-xs">
-                            {match.team_b.name.charAt(0).toUpperCase()}
-                          </AvatarFallback>
-                        </Avatar>
-                      </div>
-                    </div>
-                    
-                    <div className="flex items-center justify-between text-sm text-muted-foreground">
-                      <span>{match.overs} overs</span>
-                      {match.toss_winner && (
-                        <span className="text-xs">
-                          Toss: {match.toss_winner.name} ({match.toss_decision})
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                  
-                  <div className="flex gap-2 mt-4">
+                  {/* Navigation options at bottom */}
+                  <div className="flex gap-2 mt-4 pt-3 border-t border-gray-200">
                     <Link to={`/matches/${match.id}`} className="flex-1">
-                      <Button variant="outline" size="sm" className="w-full">
-                        <Users className="h-4 w-4 mr-1" />
-                        View Details
+                      <Button variant="outline" size="sm" className="w-full text-xs py-1 px-2 bg-white hover:bg-gray-50 text-teal-600 border-teal-200 hover:border-teal-300 rounded-full">
+                        INSIGHTS
                       </Button>
                     </Link>
+                    {match.status === 'completed' && (
+                      <Button variant="outline" size="sm" className="text-xs py-1 px-2 bg-white hover:bg-gray-50 text-teal-600 border-teal-200 hover:border-teal-300 rounded-full">
+                        TABLE
+                      </Button>
+                    )}
                   </div>
                 </CardContent>
               </Card>

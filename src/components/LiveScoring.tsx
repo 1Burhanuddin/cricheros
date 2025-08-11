@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
@@ -8,6 +8,15 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 import { Loader2, Save, X, Zap, Target, Undo2 } from 'lucide-react';
+import { 
+  calculateNextPosition, 
+  shouldSwapBatsmen, 
+  formatOverDisplay,
+  canAddBall,
+  getMatchStateSummary,
+  type OverPosition,
+  type TeamSwitch 
+} from '@/utils/overManagement';
 
 interface Player {
   id: string;
@@ -51,7 +60,7 @@ interface LiveScoringProps {
   initialBowler?: string;
 }
 
-const LiveScoring: React.FC<LiveScoringProps> = ({
+const LiveScoring = ({
   matchId,
   currentInning,
   currentOver,
@@ -63,14 +72,14 @@ const LiveScoring: React.FC<LiveScoringProps> = ({
   onPositionUpdate,
   initialBatsmen,
   initialBowler
-}) => {
+}: LiveScoringProps) => {
   const { toast } = useToast();
   const [selectedBatsman, setSelectedBatsman] = useState<string>(''); // Current striker
   const [nonStriker, setNonStriker] = useState<string>(''); // Current non-striker
   const [selectedBowler, setSelectedBowler] = useState<string>('');
   const [scoringRuns, setScoringRuns] = useState(0);
   const [scoringExtras, setScoringExtras] = useState<{ type: string; runs: number } | null>(null);
-  const [scoringWicket, setScoringWicket] = useState<{ type: string; batsman_id: string } | null>(null);
+  const [scoringWicket, setScoringWicket] = useState<{ type: string; batsman_id: string; fielder_id?: string } | null>(null);
   const [savingScore, setSavingScore] = useState(false);
   const [validationError, setValidationError] = useState<string>('');
   const [newInning, setNewInning] = useState(currentInning);
@@ -91,27 +100,88 @@ const LiveScoring: React.FC<LiveScoringProps> = ({
   // Undo functionality
   const [undoingScore, setUndoingScore] = useState(false);
   const [lastScoreId, setLastScoreId] = useState<string | null>(null);
+  
+  // Track current teams for internal team switching
+  const [currentBattingTeam, setCurrentBattingTeam] = useState(battingTeamPlayers);
+  const [currentBowlingTeam, setCurrentBowlingTeam] = useState(bowlingTeamPlayers);
+  
+  // Use ref to track previous teams to avoid circular dependency
+  const prevTeamsRef = useRef({ batting: battingTeamPlayers, bowling: bowlingTeamPlayers });
+  const prevInningRef = useRef(currentInning);
 
-  const playingXIBatsmen = battingTeamPlayers.filter(p => p.is_playing_xi);
-  const playingXIBowlers = bowlingTeamPlayers.filter(p => p.is_playing_xi);
-  const batsmenList = playingXIBatsmen.length ? playingXIBatsmen : battingTeamPlayers;
-  const bowlersList = playingXIBowlers.length ? playingXIBowlers : bowlingTeamPlayers;
+  // Add state
+  const [showStartSecondInning, setShowStartSecondInning] = useState(false);
 
-useEffect(() => {
-  setNewInning(currentInning);
-  setNewOver(currentOver);
-  setNewBall(currentBall);
-}, [currentInning, currentOver, currentBall]);
+  // Get available players from the correct teams
+  const playingXIBatsmen = currentBattingTeam.filter(p => p.is_playing_xi);
+  const playingXIBowlers = currentBowlingTeam.filter(p => p.is_playing_xi);
+  const batsmenList = playingXIBatsmen.length ? playingXIBatsmen : currentBattingTeam;
+  const bowlersList = playingXIBowlers.length ? playingXIBowlers : currentBowlingTeam;
 
-useEffect(() => {
-  if (!selectedBatsman && initialBatsmen?.length) {
-    setSelectedBatsman(initialBatsmen[0]); // First batsman is striker
-    setNonStriker(initialBatsmen[1] || ''); // Second batsman is non-striker
-  }
-  if (!selectedBowler && initialBowler) {
-    setSelectedBowler(initialBowler);
-  }
-}, [initialBatsmen, initialBowler]);
+  // Helper function to get player name
+  const getPlayerName = (playerId: string) => {
+    const player = batsmenList.find(p => p.player_id === playerId) || bowlersList.find(p => p.player_id === playerId);
+    return player ? player.player.name : 'Unknown Player';
+  };
+
+  useEffect(() => {
+    setNewInning(currentInning);
+    setNewOver(currentOver);
+    setNewBall(currentBall);
+  }, [currentInning, currentOver, currentBall]);
+
+  useEffect(() => {
+    // Update team information when props change
+    const prevBatting = prevTeamsRef.current.batting;
+    const prevBowling = prevTeamsRef.current.bowling;
+    
+    const prevInning = prevInningRef.current;
+    const newInningNum = currentInning;
+
+    console.log('Team props changed:', {
+      newBatting: battingTeamPlayers.map(p => p.player.name),
+      newBowling: bowlingTeamPlayers.map(p => p.player.name),
+      prevBatting: prevBatting.map(p => p.player.name),
+      prevBowling: prevBowling.map(p => p.player.name)
+    });
+    
+    // Check if teams have actually changed
+    if (battingTeamPlayers !== prevBatting || bowlingTeamPlayers !== prevBowling) {
+      console.log('Teams have changed, updating...');
+      
+      setCurrentBattingTeam(battingTeamPlayers);
+      setCurrentBowlingTeam(bowlingTeamPlayers);
+      
+      // Reset selections when teams change (e.g., new innings)
+      setSelectedBatsman('');
+      setNonStriker('');
+      setSelectedBowler('');
+      setShowFielderSelector(false);
+      
+      // Only show selectors if showStartSecondInning is false
+      if (!showStartSecondInning && newInningNum > prevInning) {
+        setShowNewBatsmanSelector(true);
+        setShowBowlerSelector(true);
+      } else {
+        setShowNewBatsmanSelector(false);
+        setShowBowlerSelector(false);
+      }
+      
+      // Update ref
+      prevTeamsRef.current = { batting: battingTeamPlayers, bowling: bowlingTeamPlayers };
+    }
+    prevInningRef.current = currentInning;
+  }, [battingTeamPlayers, bowlingTeamPlayers, currentInning, showStartSecondInning]);
+
+  useEffect(() => {
+    if (!selectedBatsman && initialBatsmen?.length) {
+      setSelectedBatsman(initialBatsmen[0]); // First batsman is striker
+      setNonStriker(initialBatsmen[1] || ''); // Second batsman is non-striker
+    }
+    if (!selectedBowler && initialBowler) {
+      setSelectedBowler(initialBowler);
+    }
+  }, [initialBatsmen, initialBowler]);
 
   // Validation function for cricket scoring rules
   const validateScoring = (): { isValid: boolean; error: string } => {
@@ -130,11 +200,76 @@ useEffect(() => {
     return { isValid: true, error: '' };
   };
 
+  const handleInningsChangeSelection = () => {
+    if (!selectedBatsman || !nonStriker || !selectedBowler) {
+      toast({
+        title: "Error",
+        description: "Please select both batsmen and bowler",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    // Close both selectors
+    setShowNewBatsmanSelector(false);
+    setShowBowlerSelector(false);
+    
+    // Reset form and continue
+    setScoringRuns(0);
+    setScoringExtras(null);
+    setScoringWicket(null);
+    setValidationError('');
+    
+    toast({
+      title: "New Innings Started",
+      description: `Innings ${newInning} started with ${getPlayerName(selectedBatsman)} and ${getPlayerName(nonStriker)} batting, ${getPlayerName(selectedBowler)} bowling.`
+    });
+  };
+
   const addScore = async () => {
     if (!selectedBatsman || !nonStriker || !selectedBowler) {
       toast({
         title: "Error",
         description: "Please select both batsmen and bowler",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    // Validate that batsmen are from batting team and bowler is from bowling team
+    const isBatsmanFromBattingTeam = currentBattingTeam.some(p => p.player_id === selectedBatsman);
+    const isNonStrikerFromBattingTeam = currentBattingTeam.some(p => p.player_id === nonStriker);
+    const isBowlerFromBowlingTeam = currentBowlingTeam.some(p => p.player_id === selectedBowler);
+    
+    if (!isBatsmanFromBattingTeam || !isNonStrikerFromBattingTeam) {
+      toast({
+        title: "Error",
+        description: "Selected batsmen must be from the batting team",
+        variant: "destructive"
+      });
+      return;
+    }
+    
+    if (!isBowlerFromBowlingTeam) {
+      toast({
+        title: "Error",
+        description: "Selected bowler must be from the bowling team",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    // Check if ball can be added
+    const currentPosition: OverPosition = {
+      inning: newInning,
+      over: newOver,
+      ball: newBall
+    };
+    
+    if (!canAddBall(currentPosition, totalOvers)) {
+      toast({
+        title: "Error",
+        description: "Cannot add more balls. Match or innings is complete.",
         variant: "destructive"
       });
       return;
@@ -180,41 +315,82 @@ useEffect(() => {
       // Store the last score ID for undo functionality
       setLastScoreId(newScore.id);
 
+      // Call the callback to notify parent component about the new score
+      onScoreAdded(newScore);
+
+      // Use new over management system
+      const currentPosition: OverPosition = {
+        inning: newInning,
+        over: newOver,
+        ball: newBall
+      };
+      
+      const { nextPosition, teamSwitch } = calculateNextPosition(
+        currentPosition,
+        totalOvers,
+        totalRuns
+      );
+
       // Update position
-      let nextInning = newInning;
-      let nextOver = newOver;
-      let nextBall = newBall + 1;
-      let shouldSwapBatsmen = false;
+      onPositionUpdate(nextPosition.inning, nextPosition.over, nextPosition.ball);
 
-      // Check if batsmen should swap due to odd runs
-      if (totalRuns % 2 === 1) {
-        shouldSwapBatsmen = true;
-      }
-
-      if (nextBall > 6) {
-        nextOver = nextOver + 1;
-        nextBall = 1;
-        // Batsmen always swap at end of over (regardless of runs)
-        shouldSwapBatsmen = true;
-      }
-
-      // Swap batsmen if needed
-      if (shouldSwapBatsmen) {
+      // Handle batsmen swapping
+      const isEndOfOver = teamSwitch.shouldSwitchTeams;
+      if (shouldSwapBatsmen(totalRuns, isEndOfOver)) {
         const currentStriker = selectedBatsman;
         const currentNonStriker = nonStriker;
         setSelectedBatsman(currentNonStriker);
         setNonStriker(currentStriker);
       }
 
-      // Check if innings should change
-      if (nextOver >= totalOvers) {
-        nextInning = nextInning + 1;
-        nextOver = 0;
-        nextBall = 1;
+      // Handle innings change
+      if (teamSwitch.isInningComplete) {
+        setShowStartSecondInning(true);
+        setShowBowlerSelector(false);
+        setShowNewBatsmanSelector(false);
+        setPreviousBowler(selectedBowler);
+        setSelectedBatsman('');
+        setNonStriker('');
+        setSelectedBowler('');
+        toast({
+          title: "Innings Complete",
+          description: `Innings ${newInning} complete. Teams will switch. Click 'Start 2nd Inning' to continue.`
+        });
+        return;
       }
 
-      onScoreAdded(newScore);
-      onPositionUpdate(nextInning, nextOver, nextBall);
+      // Handle team switching at end of over (but not end of innings)
+      if (teamSwitch.shouldSwitchTeams && !teamSwitch.isInningComplete) {
+        // Switch batting and bowling teams
+        setShowBowlerSelector(true);
+        setPreviousBowler(selectedBowler);
+        
+        // Clear current selections to force new selection
+        setSelectedBowler('');
+        
+        toast({
+          title: "Over Complete",
+          description: `Over ${formatOverDisplay(newOver, 6)} complete. Please select new bowler.`
+        });
+        
+        return; // Don't reset form yet, wait for bowler selection
+      }
+
+      // Handle match completion
+      if (teamSwitch.isMatchComplete) {
+        toast({
+          title: "Match Complete",
+          description: "All innings completed. Match is finished!"
+        });
+        
+        // Reset form
+        setScoringRuns(0);
+        setScoringExtras(null);
+        setScoringWicket(null);
+        setValidationError('');
+        
+        return;
+      }
 
       // Update batsman and bowler statistics
       const batsmanId = selectedBatsman;
@@ -258,12 +434,6 @@ useEffect(() => {
           return; // Don't reset form yet, wait for new batsman selection
         }
       }
-      
-      // Handle end of over - show bowler selector
-      if (nextBall === 1 && nextOver > newOver) {
-        setShowBowlerSelector(true);
-        return; // Don't reset form yet, wait for bowler selection
-      }
 
       // Reset form
       setScoringRuns(0);
@@ -287,6 +457,88 @@ useEffect(() => {
       setSavingScore(false);
     }
   };
+
+  // Persist current selection to matches so session survives reloads
+  useEffect(() => {
+    const persist = async () => {
+      try {
+        if (!matchId) return;
+        const batsmenToSave = selectedBatsman && nonStriker ? [selectedBatsman, nonStriker] : null;
+        await supabase
+          .from('matches')
+          .update({
+            current_batsmen: batsmenToSave,
+            current_bowler_id: selectedBowler || null,
+          })
+          .eq('id', matchId);
+      } catch (e) {
+        // non-fatal
+      }
+    };
+    // Only persist when we have any selection
+    if (selectedBatsman || nonStriker || selectedBowler) {
+      persist();
+    }
+  }, [matchId, selectedBatsman, nonStriker, selectedBowler]);
+
+  // Recompute on resume: populate batsman/bowler panels from DB so they don't show 0 after reload
+  useEffect(() => {
+    const recomputePanelsFromDb = async () => {
+      try {
+        if (!matchId) return;
+        const { data: inningScores } = await supabase
+          .from('match_scores')
+          .select('*')
+          .eq('match_id', matchId)
+          .eq('inning', newInning)
+          .order('over_number', { ascending: true })
+          .order('ball_number', { ascending: true });
+
+        const isBallFaced = (extrasType?: string | null) => !extrasType || extrasType === 'bye' || extrasType === 'leg_bye';
+        const isLegalDelivery = (extrasType?: string | null) => extrasType !== 'wide' && extrasType !== 'no_ball';
+        const isCreditedWicket = (wicketType?: string | null) => !!wicketType && ['bowled','caught','lbw','stumped','hit_wicket'].includes(wicketType);
+
+        // Batsman stats for striker and non-striker
+        if (selectedBatsman) {
+          const balls = (inningScores || []).filter(s => s.batsman_id === selectedBatsman && isBallFaced(s.extras_type)).length;
+          const runs = (inningScores || []).filter(s => s.batsman_id === selectedBatsman).reduce((sum, s) => sum + (s.runs || 0), 0);
+          setBatsmanStats(prev => ({
+            ...prev,
+            [selectedBatsman]: { runs, balls }
+          }));
+        }
+        if (nonStriker) {
+          const balls = (inningScores || []).filter(s => s.batsman_id === nonStriker && isBallFaced(s.extras_type)).length;
+          const runs = (inningScores || []).filter(s => s.batsman_id === nonStriker).reduce((sum, s) => sum + (s.runs || 0), 0);
+          setBatsmanStats(prev => ({
+            ...prev,
+            [nonStriker]: { runs, balls }
+          }));
+        }
+
+        // Bowler stats for current bowler
+        if (selectedBowler) {
+          const bowlerBalls = (inningScores || []).filter(s => s.bowler_id === selectedBowler && isLegalDelivery(s.extras_type)).length;
+          const bowlerRuns = (inningScores || []).filter(s => s.bowler_id === selectedBowler).reduce((sum, s) => {
+            const extrasToBowler = s.extras_type === 'wide' || s.extras_type === 'no_ball';
+            return sum + (s.runs || 0) + (extrasToBowler ? (s.extras_runs || 0) : 0);
+          }, 0);
+          const bowlerWkts = (inningScores || []).filter(s => s.bowler_id === selectedBowler && isCreditedWicket(s.wicket_type)).length;
+          setBowlerStats(prev => ({
+            ...prev,
+            [selectedBowler]: { balls: bowlerBalls, runs: bowlerRuns, wickets: bowlerWkts }
+          }));
+        }
+      } catch (e) {
+        // non-fatal
+      }
+    };
+
+    // Recompute when we have selections and inning context
+    if (matchId && newInning) {
+      recomputePanelsFromDb();
+    }
+  }, [matchId, newInning, selectedBatsman, nonStriker, selectedBowler]);
 
   const handleUndo = async () => {
     if (!lastScoreId) {
@@ -440,42 +692,56 @@ useEffect(() => {
       });
       return;
     }
-    
-    // Replace the dismissed batsman with new batsman
-    if (scoringWicket?.batsman_id === selectedBatsman) {
+
+    // Replace the dismissed batsman
+    if (scoringWicket && scoringWicket.batsman_id === selectedBatsman) {
       setSelectedBatsman(newBatsmanId);
-    } else {
+    } else if (scoringWicket && scoringWicket.batsman_id === nonStriker) {
       setNonStriker(newBatsmanId);
     }
-    
-    // Reset states
+
+    // Close the selector
     setShowNewBatsmanSelector(false);
     setNewBatsmanId('');
+
+    // Reset form and continue
     setScoringRuns(0);
     setScoringExtras(null);
     setScoringWicket(null);
     setValidationError('');
+
+    toast({
+      title: "New Batsman Selected",
+      description: `${getPlayerName(newBatsmanId)} is the new batsman.`
+    });
   };
 
   const handleNewBowlerSelection = () => {
     if (!selectedBowler) {
       toast({
-        title: "Error", 
-        description: "Please select a bowler for the new over",
+        title: "Error",
+        description: "Please select a bowler",
         variant: "destructive"
       });
       return;
     }
-    
+
     // Track previous bowler to prevent consecutive overs
     setPreviousBowler(selectedBowler);
-    
-    // Reset states
+
+    // Close the bowler selector
     setShowBowlerSelector(false);
+    
+    // Reset form and continue
     setScoringRuns(0);
     setScoringExtras(null);
     setScoringWicket(null);
     setValidationError('');
+    
+    toast({
+      title: "New Over Started",
+      description: `${getPlayerName(selectedBowler)} will bowl the next over.`
+    });
   };
 
   const handleFielderSelection = () => {
@@ -514,17 +780,24 @@ useEffect(() => {
   };
 
   const getAvailableBatsmen = () => {
-    return batsmenList.filter(player => 
+    // Batsmen should come from the batting team
+    const availableBatsmen = batsmenList.filter(player => 
       player.player_id !== selectedBatsman && 
       player.player_id !== nonStriker
     );
+    
+    console.log('Available batsmen from batting team:', availableBatsmen.map(p => p.player.name));
+    return availableBatsmen;
   };
 
   const getAvailableBowlers = () => {
-    // Exclude previous bowler to prevent consecutive overs
-    return bowlersList.filter(player => 
+    // Bowlers should come from the bowling team (the team that's NOT batting)
+    const availableBowlers = bowlersList.filter(player => 
       player.player_id !== previousBowler
     );
+    
+    console.log('Available bowlers from bowling team:', availableBowlers.map(p => p.player.name));
+    return availableBowlers;
   };
 
   const getScoreDescription = () => {
@@ -549,6 +822,15 @@ useEffect(() => {
     return parts.join(' + ');
   };
 
+  // Add a handler for the button
+  const handleStartSecondInning = () => {
+    setShowStartSecondInning(false);
+    setShowNewBatsmanSelector(true);
+    setShowBowlerSelector(true);
+  };
+
+  const isFirstInningComplete = currentInning === 1 && newOver >= totalOvers && newBall === 1;
+
   return (
     <Card>
       <CardHeader>
@@ -557,7 +839,12 @@ useEffect(() => {
           Live Scoring
         </CardTitle>
         <CardDescription>
-          Current: Inning {newInning}, Over {newOver}.{newBall} of {totalOvers}
+          {getMatchStateSummary({ inning: newInning, over: newOver, ball: newBall }, totalOvers)}
+          <br />
+          <span className="text-xs text-muted-foreground">
+            Batting: {currentBattingTeam[0]?.player?.name || 'Unknown'} | 
+            Bowling: {currentBowlingTeam[0]?.player?.name || 'Unknown'}
+          </span>
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
@@ -678,6 +965,91 @@ useEffect(() => {
           </DialogContent>
         </Dialog>
 
+        {/* Innings Change Selector Popup Modal */}
+        <Dialog open={showNewBatsmanSelector && showBowlerSelector} onOpenChange={() => {}}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle className="text-green-600">🔄 New Innings!</DialogTitle>
+              <DialogDescription>
+                Innings {newInning} is starting. Teams have switched roles. Please select new batsmen and bowler.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label>Select New Batsmen</Label>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <Label className="text-xs">Striker</Label>
+                    <Select value={selectedBatsman} onValueChange={setSelectedBatsman}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Choose striker" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {getAvailableBatsmen().map((player) => (
+                          <SelectItem key={player.player_id} value={player.player_id}>
+                            {player.player.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div>
+                    <Label className="text-xs">Non-Striker</Label>
+                    <Select value={nonStriker} onValueChange={setNonStriker}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Choose non-striker" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {getAvailableBatsmen().map((player) => (
+                          <SelectItem key={player.player_id} value={player.player_id}>
+                            {player.player.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+              </div>
+              
+              <div className="space-y-2">
+                <Label>Select New Bowler</Label>
+                <Select value={selectedBowler} onValueChange={setSelectedBowler}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Choose bowler" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {getAvailableBowlers().map((player) => (
+                      <SelectItem key={player.player_id} value={player.player_id}>
+                        {player.player.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              
+              <div className="flex gap-2">
+                <Button 
+                  onClick={handleInningsChangeSelection} 
+                  className="flex-1"
+                  disabled={!selectedBatsman || !nonStriker || !selectedBowler}
+                >
+                  Start New Innings
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setShowNewBatsmanSelector(false);
+                    setShowBowlerSelector(false);
+                  }}
+                  className="flex-1"
+                >
+                  Cancel
+                </Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+
         {/* Fielder Selection Popup Modal */}
         <Dialog open={showFielderSelector} onOpenChange={() => {}}>
           <DialogContent className="sm:max-w-md">
@@ -736,191 +1108,218 @@ useEffect(() => {
           </DialogContent>
         </Dialog>
 
-        {/* Current Statistics Display */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {/* Batsman Statistics */}
-          <div className="p-3 bg-green-50 border border-green-200 rounded-lg">
-            <h4 className="font-semibold text-green-800 mb-2">Batsman Stats</h4>
-            <div className="space-y-1 text-sm">
-              <div className="flex justify-between">
-                <span className="font-medium">
-                  {selectedBatsman ? batsmenList.find(p => p.player_id === selectedBatsman)?.player.name : 'N/A'} *
-                </span>
-                <span>{batsmanStats[selectedBatsman]?.runs || 0}({batsmanStats[selectedBatsman]?.balls || 0})</span>
-              </div>
-              <div className="flex justify-between">
-                <span>
-                  {nonStriker ? batsmenList.find(p => p.player_id === nonStriker)?.player.name : 'N/A'}
-                </span>
-                <span>{batsmanStats[nonStriker]?.runs || 0}({batsmanStats[nonStriker]?.balls || 0})</span>
-              </div>
-            </div>
-          </div>
+        {/* Start Second Inning Card */}
+        {isFirstInningComplete && showStartSecondInning && (
+          <Card className="my-8">
+            <CardHeader>
+              <CardTitle>🏏 1st Innings Complete!</CardTitle>
+              <CardDescription>
+                Click below to start the 2nd inning. You will then select the new batsmen and bowler.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Button size="lg" className="w-full" onClick={handleStartSecondInning}>
+                Start 2nd Inning
+              </Button>
+            </CardContent>
+          </Card>
+        )}
 
-          {/* Bowler Statistics */}
-          <div className="p-3 bg-red-50 border border-red-200 rounded-lg">
-            <h4 className="font-semibold text-red-800 mb-2">Bowler Stats</h4>
-            <div className="text-sm">
-              <div className="flex justify-between">
-                <span className="font-medium">
-                  {selectedBowler ? bowlersList.find(p => p.player_id === selectedBowler)?.player.name : 'N/A'}
-                </span>
-                <span>
-                  {Math.floor((bowlerStats[selectedBowler]?.balls || 0) / 6)}.{(bowlerStats[selectedBowler]?.balls || 0) % 6}-{bowlerStats[selectedBowler]?.runs || 0}-{bowlerStats[selectedBowler]?.wickets || 0}
-                </span>
+        {/* Current Statistics Display */}
+        {!showStartSecondInning && (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* Batsman Statistics */}
+            <div className="p-3 bg-green-50 border border-green-200 rounded-lg">
+              <h4 className="font-semibold text-green-800 mb-2">Batsman Stats</h4>
+              <div className="space-y-1 text-sm">
+                <div className="flex justify-between">
+                  <span className="font-medium">
+                    {selectedBatsman ? batsmenList.find(p => p.player_id === selectedBatsman)?.player.name : 'N/A'} *
+                  </span>
+                  <span>{batsmanStats[selectedBatsman]?.runs || 0}({batsmanStats[selectedBatsman]?.balls || 0})</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>
+                    {nonStriker ? batsmenList.find(p => p.player_id === nonStriker)?.player.name : 'N/A'}
+                  </span>
+                  <span>{batsmanStats[nonStriker]?.runs || 0}({batsmanStats[nonStriker]?.balls || 0})</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Bowler Statistics */}
+            <div className="p-3 bg-red-50 border border-red-200 rounded-lg">
+              <h4 className="font-semibold text-red-800 mb-2">Bowler Stats</h4>
+              <div className="text-sm">
+                <div className="flex justify-between">
+                  <span className="font-medium">
+                    {selectedBowler ? bowlersList.find(p => p.player_id === selectedBowler)?.player.name : 'N/A'}
+                  </span>
+                  <span>
+                    {Math.floor((bowlerStats[selectedBowler]?.balls || 0) / 6)}.{(bowlerStats[selectedBowler]?.balls || 0) % 6}-{bowlerStats[selectedBowler]?.runs || 0}-{bowlerStats[selectedBowler]?.wickets || 0}
+                  </span>
+                </div>
               </div>
             </div>
           </div>
-        </div>
+        )}
 
         {/* Player Selection */}
-        <div className="space-y-4">
-          {/* Current Batsmen Display */}
-          <div className="p-4 bg-muted rounded-lg">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label className="text-sm font-medium flex items-center gap-2">
-                  <Target className="h-4 w-4" />
-                  On Strike
-                </Label>
-                <div className="p-2 bg-background rounded border">
-                  <span className="font-medium">
-                    {selectedBatsman ? batsmenList.find(p => p.player_id === selectedBatsman)?.player.name : 'Select Striker'}
-                  </span>
+        {!showStartSecondInning && (
+          <div className="space-y-4">
+            {/* Current Batsmen Display */}
+            <div className="p-4 bg-muted rounded-lg">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label className="text-sm font-medium flex items-center gap-2">
+                    <Target className="h-4 w-4" />
+                    On Strike
+                  </Label>
+                  <div className="p-2 bg-background rounded border">
+                    <span className="font-medium">
+                      {selectedBatsman ? batsmenList.find(p => p.player_id === selectedBatsman)?.player.name : 'Select Striker'}
+                    </span>
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <Label className="text-sm font-medium">Non-Striker</Label>
+                  <div className="p-2 bg-background rounded border">
+                    <span className="font-medium">
+                      {nonStriker ? batsmenList.find(p => p.player_id === nonStriker)?.player.name : 'Select Non-Striker'}
+                    </span>
+                  </div>
                 </div>
               </div>
-              <div className="space-y-2">
-                <Label className="text-sm font-medium">Non-Striker</Label>
-                <div className="p-2 bg-background rounded border">
-                  <span className="font-medium">
-                    {nonStriker ? batsmenList.find(p => p.player_id === nonStriker)?.player.name : 'Select Non-Striker'}
-                  </span>
-                </div>
-              </div>
+              <p className="text-xs text-muted-foreground mt-2">
+                Batsmen will automatically rotate based on runs scored and end of overs
+              </p>
             </div>
-            <p className="text-xs text-muted-foreground mt-2">
-              Batsmen will automatically rotate based on runs scored and end of overs
-            </p>
-          </div>
 
-          {/* Bowler Selection - Locked during play */}
-          <div className="space-y-2">
-            <Label>Current Bowler</Label>
-            <div className="p-2 bg-background rounded border">
-              <span className="font-medium">
-                {selectedBowler ? bowlersList.find(p => p.player_id === selectedBowler)?.player.name : 'Select Bowler'}
-              </span>
+            {/* Bowler Selection - Locked during play */}
+            <div className="space-y-2">
+              <Label>Current Bowler</Label>
+              <div className="p-2 bg-background rounded border">
+                <span className="font-medium">
+                  {selectedBowler ? bowlersList.find(p => p.player_id === selectedBowler)?.player.name : 'Select Bowler'}
+                </span>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Bowler can only be changed at the end of each over
+              </p>
             </div>
-            <p className="text-xs text-muted-foreground">
-              Bowler can only be changed at the end of each over
-            </p>
           </div>
-        </div>
+        )}
 
         {/* Runs Selection */}
-        <div className="space-y-2">
-          <Label>Runs</Label>
-          <div className="grid grid-cols-4 gap-2">
-            {[0, 1, 2, 3, 4, 5, 6].map((runs) => {
-              // Disable runs > 0 when wicket is selected (except run_out)
-              const isDisabled = runs > 0 && scoringWicket && scoringWicket.type !== 'run_out';
-              // Disable all scoring when modals are open
-              const isModalOpen = showNewBatsmanSelector || showBowlerSelector || showFielderSelector;
-              
-              return (
-                <Button
-                  key={runs}
-                  variant={scoringRuns === runs ? "default" : "outline"}
-                  onClick={() => handleRunsClick(runs)}
-                  className="h-12 text-lg font-semibold"
-                  disabled={isDisabled || isModalOpen}
-                >
-                  {runs}
-                </Button>
-              );
-            })}
+        {!showStartSecondInning && (
+          <div className="space-y-2">
+            <Label>Runs</Label>
+            <div className="grid grid-cols-4 gap-2">
+              {[0, 1, 2, 3, 4, 5, 6].map((runs) => {
+                // Disable runs > 0 when wicket is selected (except run_out)
+                const isDisabled = runs > 0 && scoringWicket && scoringWicket.type !== 'run_out';
+                // Disable all scoring when modals are open
+                const isModalOpen = showNewBatsmanSelector || showBowlerSelector || showFielderSelector;
+                
+                return (
+                  <Button
+                    key={runs}
+                    variant={scoringRuns === runs ? "default" : "outline"}
+                    onClick={() => handleRunsClick(runs)}
+                    className="h-12 text-lg font-semibold"
+                    disabled={isDisabled || isModalOpen}
+                  >
+                    {runs}
+                  </Button>
+                );
+              })}
+            </div>
+            {scoringWicket && scoringWicket.type !== 'run_out' && (
+              <p className="text-xs text-muted-foreground">
+                Only 0 runs allowed with {scoringWicket.type.replace('_', ' ').toUpperCase()} dismissals
+              </p>
+            )}
           </div>
-          {scoringWicket && scoringWicket.type !== 'run_out' && (
-            <p className="text-xs text-muted-foreground">
-              Only 0 runs allowed with {scoringWicket.type.replace('_', ' ').toUpperCase()} dismissals
-            </p>
-          )}
-        </div>
+        )}
 
         {/* Extras Selection */}
-        <div className="space-y-2">
-          <Label>Extras (Optional)</Label>
-          <div className="grid grid-cols-2 gap-2">
-            {[
-              { type: 'wide', label: 'Wide' },
-              { type: 'no_ball', label: 'No Ball' },
-              { type: 'bye', label: 'Bye' },
-              { type: 'leg_bye', label: 'Leg Bye' }
-            ].map((extra) => {
-              // Disable extras when wicket is selected (except run_out)
-              const isDisabled = scoringWicket && scoringWicket.type !== 'run_out';
-              // Disable all scoring when modals are open
-              const isModalOpen = showNewBatsmanSelector || showBowlerSelector || showFielderSelector;
-              
-              return (
-                <Button
-                  key={extra.type}
-                  variant={scoringExtras?.type === extra.type ? "default" : "outline"}
-                  onClick={() => handleExtrasClick(extra.type)}
-                  className="h-8"
-                  disabled={isDisabled || isModalOpen}
-                >
-                  {extra.label}
-                </Button>
-              );
-            })}
+        {!showStartSecondInning && (
+          <div className="space-y-2">
+            <Label>Extras (Optional)</Label>
+            <div className="grid grid-cols-2 gap-2">
+              {[
+                { type: 'wide', label: 'Wide' },
+                { type: 'no_ball', label: 'No Ball' },
+                { type: 'bye', label: 'Bye' },
+                { type: 'leg_bye', label: 'Leg Bye' }
+              ].map((extra) => {
+                // Disable extras when wicket is selected (except run_out)
+                const isDisabled = scoringWicket && scoringWicket.type !== 'run_out';
+                // Disable all scoring when modals are open
+                const isModalOpen = showNewBatsmanSelector || showBowlerSelector || showFielderSelector;
+                
+                return (
+                  <Button
+                    key={extra.type}
+                    variant={scoringExtras?.type === extra.type ? "default" : "outline"}
+                    onClick={() => handleExtrasClick(extra.type)}
+                    className="h-8"
+                    disabled={isDisabled || isModalOpen}
+                  >
+                    {extra.label}
+                  </Button>
+                );
+              })}
+            </div>
+            {scoringWicket && scoringWicket.type !== 'run_out' && (
+              <p className="text-xs text-muted-foreground">
+                No extras allowed with {scoringWicket.type.replace('_', ' ').toUpperCase()} dismissals
+              </p>
+            )}
           </div>
-          {scoringWicket && scoringWicket.type !== 'run_out' && (
-            <p className="text-xs text-muted-foreground">
-              No extras allowed with {scoringWicket.type.replace('_', ' ').toUpperCase()} dismissals
-            </p>
-          )}
-        </div>
+        )}
 
         {/* Wickets Selection */}
-        <div className="space-y-2">
-          <Label>Wickets (Optional)</Label>
-          <div className="grid grid-cols-2 gap-2">
-            {[
-              { type: 'bowled', label: 'Bowled' },
-              { type: 'caught', label: 'Caught' },
-              { type: 'lbw', label: 'LBW' },
-              { type: 'run_out', label: 'Run Out' },
-              { type: 'stumped', label: 'Stumped' },
-              { type: 'hit_wicket', label: 'Hit Wicket' }
-            ].map((wicket) => {
-              // Disable wickets when extras are selected (except run_out)
-              const isDisabled = scoringExtras && wicket.type !== 'run_out';
-              // Disable all scoring when modals are open
-              const isModalOpen = showNewBatsmanSelector || showBowlerSelector || showFielderSelector;
-              
-              return (
-                <Button
-                  key={wicket.type}
-                  variant={scoringWicket?.type === wicket.type ? "default" : "outline"}
-                  onClick={() => handleWicketClick(wicket.type)}
-                  className="h-8"
-                  disabled={isDisabled || isModalOpen}
-                >
-                  {wicket.label}
-                </Button>
-              );
-            })}
+        {!showStartSecondInning && (
+          <div className="space-y-2">
+            <Label>Wickets (Optional)</Label>
+            <div className="grid grid-cols-2 gap-2">
+              {[
+                { type: 'bowled', label: 'Bowled' },
+                { type: 'caught', label: 'Caught' },
+                { type: 'lbw', label: 'LBW' },
+                { type: 'run_out', label: 'Run Out' },
+                { type: 'stumped', label: 'Stumped' },
+                { type: 'hit_wicket', label: 'Hit Wicket' }
+              ].map((wicket) => {
+                // Disable wickets when extras are selected (except run_out)
+                const isDisabled = scoringExtras && wicket.type !== 'run_out';
+                // Disable all scoring when modals are open
+                const isModalOpen = showNewBatsmanSelector || showBowlerSelector || showFielderSelector;
+                
+                return (
+                  <Button
+                    key={wicket.type}
+                    variant={scoringWicket?.type === wicket.type ? "default" : "outline"}
+                    onClick={() => handleWicketClick(wicket.type)}
+                    className="h-8"
+                    disabled={isDisabled || isModalOpen}
+                  >
+                    {wicket.label}
+                  </Button>
+                );
+              })}
+            </div>
+            {(scoringRuns > 0 || scoringExtras) && (
+              <p className="text-xs text-muted-foreground">
+                Only Run Out is available when runs are scored or extras are selected
+              </p>
+            )}
           </div>
-          {(scoringRuns > 0 || scoringExtras) && (
-            <p className="text-xs text-muted-foreground">
-              Only Run Out is available when runs are scored or extras are selected
-            </p>
-          )}
-        </div>
+        )}
 
         {/* Validation Error Display */}
-        {validationError && (
+        {!showStartSecondInning && (
           <div className="p-3 bg-destructive/10 border border-destructive/20 rounded-lg">
             <div className="flex items-center gap-2">
               <X className="h-4 w-4 text-destructive" />
@@ -930,96 +1329,106 @@ useEffect(() => {
         )}
 
         {/* Current Selection Display */}
-        {(scoringRuns > 0 || scoringExtras || scoringWicket) && (
-          <div className="p-4 bg-muted rounded-lg">
-            <div className="flex items-center justify-between">
-              <div>
-                <Label className="text-sm font-medium">Current Selection:</Label>
-                <p className="text-sm text-muted-foreground">{getScoreDescription()}</p>
+        {!showStartSecondInning && (
+          (scoringRuns > 0 || scoringExtras || scoringWicket) && (
+            <div className="p-4 bg-muted rounded-lg">
+              <div className="flex items-center justify-between">
+                <div>
+                  <Label className="text-sm font-medium">Current Selection:</Label>
+                  <p className="text-sm text-muted-foreground">{getScoreDescription()}</p>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={clearSelections}
+                  className="h-8 w-8 p-0"
+                >
+                  <X className="h-4 w-4" />
+                </Button>
               </div>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={clearSelections}
-                className="h-8 w-8 p-0"
-              >
-                <X className="h-4 w-4" />
-              </Button>
             </div>
-          </div>
+          )
         )}
 
         {/* Add Score Button */}
-        <Button 
-          onClick={addScore} 
-          disabled={savingScore || !selectedBatsman || !selectedBowler || showNewBatsmanSelector || showBowlerSelector || showFielderSelector}
-          className="w-full"
-          size="lg"
-        >
-          {savingScore ? (
-            <>
-              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-              Adding Score...
-            </>
-          ) : (
-            <>
-              <Save className="h-4 w-4 mr-2" />
-              Add Score
-            </>
-          )}
-        </Button>
+        {!showStartSecondInning && (
+          <Button 
+            onClick={addScore} 
+            disabled={savingScore || !selectedBatsman || !selectedBowler || showNewBatsmanSelector || showBowlerSelector || showFielderSelector}
+            className="w-full"
+            size="lg"
+          >
+            {savingScore ? (
+              <>
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                Adding Score...
+              </>
+            ) : (
+              <>
+                <Save className="h-4 w-4 mr-2" />
+                Add Score
+              </>
+            )}
+          </Button>
+        )}
 
         {/* Undo Button */}
-        <Button
-          variant="destructive"
-          onClick={handleUndo}
-          disabled={undoingScore || !lastScoreId}
-          className="w-full"
-          size="lg"
-        >
-          {undoingScore ? (
-            <>
-              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-              Undoing...
-            </>
-          ) : (
-            <>
-              <Undo2 className="h-4 w-4 mr-2" />
-              Undo Last Ball
-            </>
-          )}
-        </Button>
+        {!showStartSecondInning && (
+          <Button
+            variant="destructive"
+            onClick={handleUndo}
+            disabled={undoingScore || !lastScoreId}
+            className="w-full"
+            size="lg"
+          >
+            {undoingScore ? (
+              <>
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                Undoing...
+              </>
+            ) : (
+              <>
+                <Undo2 className="h-4 w-4 mr-2" />
+                Undo Last Ball
+              </>
+            )}
+          </Button>
+        )}
 
         {/* Scoring Disabled Message */}
-        {(showNewBatsmanSelector || showBowlerSelector || showFielderSelector) && (
-          <div className="p-3 bg-yellow-50 border border-yellow-200 rounded-lg text-center">
-            <p className="text-sm text-yellow-800 font-medium">
-              ⚠️ Scoring is disabled until player selection is complete
-            </p>
-          </div>
+        {!showStartSecondInning && (
+          (showNewBatsmanSelector || showBowlerSelector || showFielderSelector) && (
+            <div className="p-3 bg-yellow-50 border border-yellow-200 rounded-lg text-center">
+              <p className="text-sm text-yellow-800 font-medium">
+                ⚠️ Scoring is disabled until player selection is complete
+              </p>
+            </div>
+          )
         )}
 
         {/* Quick Actions */}
-        <div className="flex gap-2">
-          <Button
-            variant="outline"
-            onClick={() => handleRunsClick(4)}
-            className="flex-1"
-            disabled={showNewBatsmanSelector || showBowlerSelector || showFielderSelector}
-          >
-            <Zap className="h-4 w-4 mr-2" />
-            Four
-          </Button>
-          <Button
-            variant="outline"
-            onClick={() => handleRunsClick(6)}
-            className="flex-1"
-            disabled={showNewBatsmanSelector || showBowlerSelector || showFielderSelector}
-          >
-            <Zap className="h-4 w-4 mr-2" />
-            Six
-          </Button>
-        </div>
+        {!showStartSecondInning && (
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              onClick={() => handleRunsClick(4)}
+              className="flex-1"
+              disabled={showNewBatsmanSelector || showBowlerSelector || showFielderSelector}
+            >
+              <Zap className="h-4 w-4 mr-2" />
+              Four
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => handleRunsClick(6)}
+              className="flex-1"
+              disabled={showNewBatsmanSelector || showBowlerSelector || showFielderSelector}
+            >
+              <Zap className="h-4 w-4 mr-2" />
+              Six
+            </Button>
+          </div>
+        )}
       </CardContent>
     </Card>
   );
